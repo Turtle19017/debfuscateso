@@ -6,18 +6,19 @@ This repository intentionally does **not** include the original APK/SO binaries 
 
 ## Current checkpoint
 
-The important protection and metadata stages are now reproducible offline:
+The important protection, metadata and loader-fixup stages are now reproducible offline:
 
 1. `base.apk` reaches `System.loadLibrary("ysmteam")` from the application's startup path.
 2. The native constructor decrypts outer `.main` at `VA 0xFBBAC`, size `0x2680`.
 3. The outer VM layer and its six protected streams are mapped.
-4. The inner payload is recovered offline through the `B1E90` white-box block stage, ChaCha20 and zlib.
-5. The exact `0x530070`-byte inner memory image is reproducible from the original SO without running Android.
-6. Encrypted inner `.dynstr`, `.dynsym`, PLT records and non-PLT relocation records are recoverable offline.
-7. Custom relocations normalize to 3,272 `R_AARCH64_ABS64`, 477 `R_AARCH64_GLOB_DAT` and 3,097 `R_AARCH64_JUMP_SLOT` entries.
-8. Exact inner JNI exports are known, including `JNI_OnLoad @ 0x27C444` and `Java_com_ysmteam_imgui_GLES3JNIView_step @ 0x26FAF0`.
-9. `GLES3JNIView_step` calls the custom menu renderer at `0x27CAEC`.
-10. The outer normal-ELF parser (`C6F10/C6F90/C7028`) is mapped through program headers and the relevant `DT_*` tags.
+4. The exact `0x530070`-byte inner image is recovered offline through `B1E90`, ChaCha20 and zlib.
+5. Encrypted inner `.dynstr`, `.dynsym`, PLT records and symbol-based relocation records are recoverable offline.
+6. Symbol relocations normalize to 3,272 `R_AARCH64_ABS64`, 477 `R_AARCH64_GLOB_DAT` and 3,097 `R_AARCH64_JUMP_SLOT` entries.
+7. A second runtime table contains 13,896 two-qword relative fixups applied by `C8DBC` before the symbol-based passes.
+8. The exact ten-library custom-loader dependency order is recovered from the outer SO's own RELATIVE relocation slots.
+9. Exact inner JNI exports are known, including `JNI_OnLoad @ 0x27C444` and `Java_com_ysmteam_imgui_GLES3JNIView_step @ 0x26FAF0`.
+10. `GLES3JNIView_step` calls the custom menu renderer at `0x27CAEC`.
+11. The outer normal-ELF parser (`C6F10/C6F90/C7028`) is mapped through PT_LOAD/PT_DYNAMIC and the relevant `DT_*` tags.
 
 The repository is for reverse-engineering research and documentation. It does not contain an authentication-bypass patch.
 
@@ -37,7 +38,7 @@ size   = 0x530070
 sha256 = 5a0ff6b4e1d3bf811dbd1f2b5db3e48ae14c12fb6da5f5662bf2e3c7bd66f168
 ```
 
-### 2. Recover symbols and relocations
+### 2. Recover dynsym and symbol-based relocations
 
 ```bash
 python tools/recover_inner_symbols.py \
@@ -48,20 +49,36 @@ python tools/recover_inner_symbols.py \
   --dump-raw
 ```
 
-Important outputs:
+### 3. Recover runtime relative fixups and dependency order
 
-```text
-inner_meta/dynstr.bin
-inner_meta/dynsym.bin
-inner_meta/dynsym.tsv
-inner_meta/plt.tsv
-inner_meta/relocs.tsv
-inner_meta/rela.dyn.bin
-inner_meta/rela.plt.bin
-inner_meta/manifest.json
+```bash
+python tools/recover_inner_runtime_metadata.py \
+  libysmteam.so \
+  inner_runtime \
+  --strict-hash
+
+cp inner_runtime/rela.relative.bin inner_meta/
+cp inner_runtime/needed.txt inner_meta/
 ```
 
-### 3A. Build the conservative analysis ELF
+This recovers:
+
+```text
+13,896 runtime relative fixups
+exact custom-loader dependency order:
+  liblog.so
+  libandroid.so
+  libEGL.so
+  libGLESv2.so
+  libGLESv3.so
+  libGLESv1_CM.so
+  libz.so
+  libdl.so
+  libc.so
+  libm.so
+```
+
+### 4A. Build the conservative analysis ELF
 
 ```bash
 python tools/build_inner_analysis_elf.py \
@@ -70,9 +87,7 @@ python tools/build_inner_analysis_elf.py \
   --metadata-dir inner_meta
 ```
 
-This keeps the reconstructed metadata mostly as analysis sections and makes Ghidra/IDA/llvm-objdump much easier to use.
-
-### 3B. Build the loader-shaped reconstruction
+### 4B. Build the loader-shaped reconstruction
 
 ```bash
 python tools/build_inner_reconstructed_elf.py \
@@ -81,26 +96,21 @@ python tools/build_inner_reconstructed_elf.py \
   --metadata-dir inner_meta
 ```
 
-This second wrapper additionally emits an allocated synthetic metadata `PT_LOAD`, SysV `.hash`, `.dynamic` and `PT_DYNAMIC`, including reconstructed:
+When `rela.relative.bin` is present, the reconstructed `.rela.dyn` contains:
 
 ```text
-DT_NEEDED x10
-DT_HASH
-DT_STRTAB
-DT_SYMTAB
-DT_STRSZ
-DT_SYMENT
-DT_RELA
-DT_RELASZ
-DT_RELAENT
-DT_PLTGOT
-DT_PLTRELSZ
-DT_PLTREL = DT_RELA
-DT_JMPREL
-DT_SONAME = libysmteam.so
+13,896 R_AARCH64_RELATIVE
+ 3,272 R_AARCH64_ABS64
+   477 R_AARCH64_GLOB_DAT
+-------------------------
+17,645 .rela.dyn entries
+
+3,097 R_AARCH64_JUMP_SLOT in .rela.plt
 ```
 
-The generated metadata VA/program headers are explicitly synthetic analysis reconstruction; they are not claimed to be the producer's original ELF file layout.
+The synthetic `.dynamic` also emits `DT_RELACOUNT=13896`, the recovered dependency order, SysV `.hash`, dynstr/dynsym, RELA tables and SONAME `libysmteam.so`.
+
+The generated metadata VA/program headers remain explicitly synthetic analysis reconstruction; they are not claimed to be the producer's original ELF file layout.
 
 ## Other tools
 
@@ -134,7 +144,8 @@ DobbyHook                                          0x358CE8  size 0x158
 - `research/B1E90.md` — white-box block transform and extraction validation.
 - `research/INNER_LAYOUT.md` — recovered memory-image boundaries and synthetic layout.
 - `research/INNER_METADATA.md` — recovered dynstr/dynsym and exact JNI/PLT mapping.
-- `research/RELOCATIONS.md` — custom relocation semantics and normalization to ELF RELA.
+- `research/RELOCATIONS.md` — 40-byte custom symbol-relocation semantics.
+- `research/RUNTIME_FIXUPS.md` — 13,896 relative fixups, mapping-base/load-bias semantics and exact dependency order.
 - `research/ELF_PARSER.md` — normal ELF parser, PT_LOAD/PT_DYNAMIC and recovered `DT_*` semantics.
 - `research/AUTH_FLOW.md` — menu/login data flow and remaining protocol questions.
 
