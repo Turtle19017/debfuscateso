@@ -1,11 +1,18 @@
 #!/usr/bin/env python3
-"""Recover .gcc_except_table/.rodata boundary from surviving ARM64 EH metadata."""
+"""Recover exception metadata facts from surviving ARM64 EH data.
+
+For the mapped sample, the exact section start is now constrained independently by
+the recovered low dynamic-section layout: .rela.plt ends at 0xED3B0 and valid LSDA
+bytes begin immediately there. The FDE walk still reports the minimum *referenced*
+LSDA separately (0xED59C).
+"""
 from __future__ import annotations
 import argparse, json, struct
 from pathlib import Path
 
 EH_FRAME_HDR = 0x1FFAFC
 EH_FRAME = 0x2125F0
+GCC_SECTION_START = 0xED3B0
 
 
 def uleb(b,p):
@@ -90,16 +97,20 @@ def main():
             d,p=uleb(b,p);ends.append(p+d)
         ce=b[p];p+=1;cl,p=uleb(b,p)
         if te==0xff:ends.append(p+cl)
-    gcc_start=min(lsdas); gcc_end=max(ends); ro_end=EH_FRAME_HDR
+    min_referenced=min(lsdas); gcc_end=max(ends); ro_end=EH_FRAME_HDR
+    if GCC_SECTION_START > min_referenced or b[GCC_SECTION_START] != 0xff:
+        raise SystemExit('mapped .gcc_except_table start validation failed')
     out={
         'fde_count':fdes,'distinct_lsda_count':len(set(lsdas)),
-        'gcc_except_table':{'addr':gcc_start,'offset':gcc_start,'size':gcc_end-gcc_start,'end':gcc_end},
+        'minimum_referenced_lsda':min_referenced,
+        'gcc_except_table':{'addr':GCC_SECTION_START,'offset':GCC_SECTION_START,'size':gcc_end-GCC_SECTION_START,'end':gcc_end},
         'rodata':{'addr':gcc_end,'offset':gcc_end,'size':ro_end-gcc_end,'end':ro_end},
     }
-    print(f"[+] FDEs              {fdes}")
-    print(f"[+] distinct LSDAs    {len(set(lsdas))}")
-    print(f"[+] .gcc_except_table 0x{gcc_start:x}..0x{gcc_end:x} size=0x{gcc_end-gcc_start:x}")
-    print(f"[+] .rodata           0x{gcc_end:x}..0x{ro_end:x} size=0x{ro_end-gcc_end:x}")
+    print(f"[+] FDEs               {fdes}")
+    print(f"[+] distinct LSDAs     {len(set(lsdas))}")
+    print(f"[+] min referenced LSDA 0x{min_referenced:x}")
+    print(f"[+] .gcc_except_table  0x{GCC_SECTION_START:x}..0x{gcc_end:x} size=0x{gcc_end-GCC_SECTION_START:x}")
+    print(f"[+] .rodata            0x{gcc_end:x}..0x{ro_end:x} size=0x{ro_end-gcc_end:x}")
     if a.json:
         a.json.write_text(json.dumps(out,indent=2));print(f'[+] wrote {a.json}')
     return 0
