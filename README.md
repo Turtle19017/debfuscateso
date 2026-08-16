@@ -16,11 +16,10 @@ For the mapped sample, the important stages are reproducible offline:
 - exact custom resolver SysV bucket/chain tables (`6837/6837`);
 - exact `.init_array` / `.fini_array` metadata;
 - protected original-shape program headers: `e_phoff=0x40`, `e_phnum=9`, three original PT_LOAD mappings and original PT_DYNAMIC/PT_NOTE/GNU_RELRO/EH_FRAME/STACK roles;
-- original low dynamic-section placement recovered from `.dynsym` through `.rela.plt`;
-- GNU-version tables survive parseably, and the original GNU-hash header is recovered as `nbuckets=1625`, `symoffset=336`, `bloom_size=2048`, `bloom_shift=26`;
-- corrected `.gcc_except_table` start `0xED3B0` and exact following `.rodata`/EH/text/PLT layout;
-- full 27-entry semantic section-table reconstruction at `e_shoff=0x52F9B0`, `e_shnum=27`, `e_shstrndx=26`;
-- original-placement semantic ELF reconstruction that stays exactly `0x530070` bytes instead of appending metadata into BSS.
+- high-confidence original 27-section layout and original low dynamic-section placements;
+- proof that stripped ELF metadata regions are destructive high-entropy 7-bit filler rather than ordinary reversible ciphertext;
+- original GNU-hash header + complete 2048-word bloom filter survive byte-for-byte, with the final 336 chain entries also surviving;
+- a canonical NDK/LLD-shaped `PT_DYNAMIC` reconstruction that fills the recovered original `0x230` segment exactly with 35 `Elf64_Dyn` records, including eager-binding flags required by full RELRO.
 
 Known inner image:
 
@@ -70,6 +69,19 @@ python tools/recover_inner_original_layout.py \
   --metadata-dir inner_meta \
   --aux-dir inner_aux
 
+python tools/audit_inner_randomization.py \
+  ysm_inner_payload.bin \
+  --metadata-dir inner_meta \
+  --aux-dir inner_aux \
+  --json randomization_audit.json
+
+python tools/recover_inner_dynamic_table.py \
+  ysm_inner_payload.bin \
+  dynamic_meta \
+  --metadata-dir inner_meta \
+  --aux-dir inner_aux \
+  --layout-manifest original_layout/original_layout.json
+
 python tools/build_inner_original_placement_elf.py \
   ysm_inner_payload.bin \
   ysm_inner.original_placement.so \
@@ -79,22 +91,20 @@ python tools/build_inner_original_placement_elf.py \
   --layout-manifest original_layout/original_layout.json
 ```
 
-The older analysis/near-original builders are still useful when experimenting, but `build_inner_original_placement_elf.py` is now the preferred reconstruction for this mapped sample.
-
-## Recovered original section layout
+## Important recovered layout
 
 ```text
 .note.android.ident  0x000238 .. 0x0002D0
-.dynsym              0x0002D0 .. 0x0283C8  size 0x280F8
-.gnu.version         0x0283C8 .. 0x02B932  size 0x356A
-.gnu.version_r       0x02B934 .. 0x02B994  size 0x60
-.gnu.hash            0x02B998 .. 0x0378A0  size 0xBF08
-.hash                0x0378A0 .. 0x044E50  size 0xD5B0
-.dynstr              0x044E50 .. 0x073B1D  size 0x2ECCD
-.rela.dyn            0x073B20 .. 0x0DB158  size 0x67638
-.rela.plt            0x0DB158 .. 0x0ED3B0  size 0x12258
-.gcc_except_table    0x0ED3B0 .. 0x0F5EB0  size 0x8B00
-.rodata              0x0F5EB0 .. 0x1FFAFC  size 0x109C4C
+.dynsym              0x0002D0 .. 0x0283C8
+.gnu.version         0x0283C8 .. 0x02B932
+.gnu.version_r       0x02B934 .. 0x02B994
+.gnu.hash            0x02B998 .. 0x0378A0
+.hash                0x0378A0 .. 0x044E50
+.dynstr              0x044E50 .. 0x073B1D
+.rela.dyn            0x073B20 .. 0x0DB158
+.rela.plt            0x0DB158 .. 0x0ED3B0
+.gcc_except_table    0x0ED3B0 .. 0x0F5EB0
+.rodata              0x0F5EB0 .. 0x1FFAFC
 .eh_frame_hdr        0x1FFAFC .. 0x2125F0
 .eh_frame            0x2125F0 .. 0x25E2D4
 .text                0x25E2E0 .. 0x4D6810
@@ -115,40 +125,42 @@ The older analysis/near-original builders are still useful when experimenting, b
 section headers file 0x52F9B0 .. 0x530070 = 27 * 0x40
 ```
 
-The earlier `0xED59C` value is retained only as the **minimum LSDA referenced by an FDE**. It is not the section start; the true `.gcc_except_table` begins at `0xED3B0`, immediately after the recovered `.rela.plt` extent.
-
-The surviving `.shstrtab` stores `.gnu.hash` and `.got.plt`; ELF section names can point into the middle of another string, so `.hash` and `.plt` are valid suffix names. The 24 standalone names + `.hash` + `.plt` + NULL give exactly 27 sections, matching the surviving `0x6C0` section-header tail.
-
-## Original-placement reconstruction validation
-
-The current builder restores/regenerates dynamic metadata at the recovered original file positions instead of extending BSS:
+Recovered ELF-header shape:
 
 ```text
-.dynsym      file/VA 0x0002D0
-.gnu.version file/VA 0x0283C8  (surviving bytes preserved)
-.gnu.version_r       0x02B934  (surviving bytes preserved)
-.gnu.hash            0x02B998  (regenerated from recovered header + dynsym/dynstr)
-.hash                0x0378A0  (exact recovered SysV resolver table)
-.dynstr              0x044E50
-.rela.dyn            0x073B20
-.rela.plt            0x0DB158
-.dynamic       file  0x505570 / VA 0x509570
-section headers file 0x52F9B0
+e_phoff     = 0x40
+e_phnum     = 9
+e_shoff     = 0x52F9B0
+e_shentsize = 0x40
+e_shnum     = 27
+e_shstrndx  = 26
 ```
 
-On the mapped sample:
+## Destructive stripping result
+
+The randomized raw ranges for `dynsym`, `rela.dyn`, `rela.plt`, `PT_DYNAMIC`, the ELF/PHDR header area and the section-header tail contain only values `0x00..0x7f` and have near-7-bit-maximal entropy. Exact recovered metadata contains many high-bit bytes that are absent from those raw ranges. These regions are therefore treated as destructively replaced data, not as a generic reversible stream cipher.
+
+The GNU hash is a useful exception: its original 16-byte header and entire `0x4000`-byte bloom filter survive exactly. Rebuilding buckets/chains from recovered dynsym order also matches the surviving final 336 chain entries (symbols `6501..6836`).
+
+## PT_DYNAMIC shape
+
+Recovered `PT_DYNAMIC` is exactly `0x230` bytes = 35 `Elf64_Dyn` records. The canonical NDK/LLD-shaped reconstruction uses ten `DT_NEEDED` records plus:
 
 ```text
-file       -> ELF64 AArch64 shared object, Android 21, NDK r25c
-readelf -h -> 9 program headers, 27 section headers
-readelf -S -> coherent recovered section map
-readelf -V -> 6837 version symbols + 3 version-needed records
-readelf -I -> valid SysV and GNU hash histograms
-readelf -d -> 33 reconstructed dynamic entries at original PT_DYNAMIC
-readelf -r --use-dynamic -> 17645 .rela.dyn + 3097 .rela.plt
+DT_SONAME
+DT_FLAGS = DF_BIND_NOW
+DT_FLAGS_1 = DF_1_NOW
+DT_RELA / DT_RELASZ / DT_RELAENT / DT_RELACOUNT
+DT_JMPREL / DT_PLTRELSZ / DT_PLTGOT / DT_PLTREL
+DT_SYMTAB / DT_SYMENT / DT_STRTAB / DT_STRSZ
+DT_GNU_HASH / DT_HASH
+DT_INIT_ARRAY / DT_INIT_ARRAYSZ
+DT_FINI_ARRAY / DT_FINI_ARRAYSZ
+DT_VERSYM / DT_VERNEED / DT_VERNEEDNUM
+DT_NULL
 ```
 
-This is still called a **semantic reconstruction**, not a byte-perfect producer file: protected bytes such as original hash bodies/dynamic entries/SHDR fields were destroyed or scrambled, so those are regenerated from recovered semantics where necessary.
+This fills the recovered segment exactly with no padding entries. The ordering is a high-confidence canonical reconstruction; the stripped raw `.dynamic` bytes do not directly retain original ordering.
 
 ## Exact inner entry points
 
@@ -180,7 +192,8 @@ DobbyHook                                          0x358CE8  size 0x158
 - `research/HASH_AND_ARRAYS.md`
 - `research/SECTION_FACTS.md`
 - `research/EXCEPTION_SECTIONS.md`
-- `research/ORIGINAL_SECTION_LAYOUT.md`
+- `research/DESTRUCTIVE_STRIPPING.md`
+- `research/DYNAMIC_TABLE.md`
 - `research/AUTH_FLOW.md`
 
 Original analyzed `libysmteam.so` SHA-256:
