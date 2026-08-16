@@ -1,85 +1,55 @@
 # Outer ELF parser and dynamic reconstruction
 
-This checkpoint separates two concepts that were previously easy to conflate:
+This note records the normal ELF parser in the outer loader and how it now lines up with the separately recovered protected-inner program-header table.
 
-1. the outer library contains a normal ELF parser used for already-formed ELF images;
-2. the protected inner module stores its symbol/relocation metadata separately, so the recovered `0x530070` inner image is not itself the producer's original ELF file.
+## Normal ELF parsing path
 
-The parser is still useful because it reveals exactly which ELF structures the loader expects and provides a template for a loader-shaped reconstruction.
+`0xC6F10` scans the first `0x80` bytes of a supplied image for ELF magic `7F 45 4C 46`.
+When found it stores the header pointer and the byte offset of that header inside the supplied buffer.
 
-## ELF magic and program headers
-
-`0xC6F10` scans the first `0x80` bytes of a supplied image for the four-byte ELF magic `7F 45 4C 46`.
-
-When found it stores:
-
-```text
-ctx + 0x18 = pointer to located Elf64_Ehdr
-ctx + 0x38 = byte offset of the ELF header within the supplied buffer
-```
-
-`0xC7294` then reads the standard `Elf64_Ehdr` fields:
+`0xC7294` then reads standard `Elf64_Ehdr` fields:
 
 ```text
 Ehdr + 0x20 = e_phoff
 Ehdr + 0x38 = e_phnum
 ```
 
-and computes:
-
-```text
-ctx + 0x28 = e_phnum
-ctx + 0x20 = image_base + elf_header_offset + e_phoff
-```
-
-So the code is using normal 64-bit ELF program headers with `sizeof(Elf64_Phdr) == 0x38`.
+and computes the program-header pointer. The parser uses normal 64-bit program headers with `sizeof(Elf64_Phdr) == 0x38`.
 
 ## PT_LOAD scan at `0xC6F90`
 
-The function walks all program headers in `0x38`-byte steps and recognizes `p_type == PT_LOAD (1)`.
+`0xC6F90` walks the program headers in `0x38`-byte steps and recognizes `PT_LOAD`.
+It counts load segments, finds the minimum `p_vaddr`, page-aligns that value and computes the load bias from the mapped image base.
 
-For every load segment it:
-
-- increments the load-segment count;
-- finds the minimum `p_vaddr`;
-- page-aligns that minimum down to `0x1000`;
-- computes the load bias from the supplied mapped image base.
-
-Recovered context fields:
+Recovered context fields include:
 
 ```text
 ctx + 0xC0 = load_bias
 ctx + 0xC8 = number_of_PT_LOAD_segments
 ```
 
-The resulting formula is equivalent to:
+## PT_DYNAMIC parser at `0xC7028`
 
-```c
-load_bias = mapped_base - page_align_down(min_load_p_vaddr);
-```
+`0xC7028` finds `PT_DYNAMIC` and consumes ordinary `Elf64_Dyn` entries until `DT_NULL`.
 
-## PT_DYNAMIC and dynamic tags at `0xC7028`
-
-`0xC7028` finds `PT_DYNAMIC (2)` and walks normal `Elf64_Dyn` entries until `DT_NULL`.
-
-High-confidence tag mapping from direct comparisons in the routine:
+High-confidence tag mapping:
 
 | Tag | Meaning | Loader action |
 |---:|---|---|
-| `2` | `DT_PLTRELSZ` | divides by 24 and stores PLT relocation count |
-| `4` | `DT_HASH` | parses SysV hash header/buckets/chains |
+| `2` | `DT_PLTRELSZ` | divide by 24 and store PLT RELA count |
+| `4` | `DT_HASH` | parse SysV hash |
 | `5` | `DT_STRTAB` | `load_bias + d_ptr` |
 | `6` | `DT_SYMTAB` | `load_bias + d_ptr` |
 | `7` | `DT_RELA` | `load_bias + d_ptr` |
-| `8` | `DT_RELASZ` | divides by 24 and stores RELA count |
-| `10` | `DT_STRSZ` | stores string-table size |
-| `14` | `DT_SONAME` | stores string-table offset and a present flag |
+| `8` | `DT_RELASZ` | divide by 24 and store RELA count |
+| `10` | `DT_STRSZ` | store dynstr size |
+| `14` | `DT_SONAME` | store dynstr offset |
 | `23` | `DT_JMPREL` | `load_bias + d_ptr` |
-| `0x6FFFFEF5` | `DT_GNU_HASH` | parses GNU-hash header/bloom/buckets/chains |
+| `0x6FFFFEF5` | `DT_GNU_HASH` | parse GNU hash |
 
-The division used for `DT_PLTRELSZ`/`DT_RELASZ` is by `sizeof(Elf64_Rela) == 24`, confirming RELA rather than REL.
+The 24-byte divisor confirms `Elf64_Rela`, not REL.
 
-Useful recovered context fields include:
+Useful context fields:
 
 ```text
 ctx + 0x48 = DT_STRTAB pointer
@@ -91,107 +61,95 @@ ctx + 0xE0 = DT_RELA pointer
 ctx + 0xE8 = DT_RELASZ / 24
 ```
 
-`0xC7360` resolves the SONAME by returning:
+## Program-header status: now recovered
+
+An earlier checkpoint correctly observed that reversing `C6F10..C7294` alone did not reveal the protected inner module's producer-side program headers.
+That gap is now closed independently by the compact protected PHDR table used by `FD55C`.
+
+For the mapped sample, `tools/recover_inner_phdrs.py` recovers:
 
 ```text
-strtab + soname_offset
+e_phoff      0x40
+e_phentsize  0x38
+e_phnum      9
+PHDR end     0x238
 ```
 
-when `DT_SONAME` was present.
+and nine records containing exact `p_type`, `p_flags`, `p_offset`, `p_vaddr`, `p_filesz` and `p_memsz` values.
+The compact records omit only `p_paddr` and `p_align`.
 
-## What this does and does not prove for the inner module
+The three recovered `PT_LOAD` mappings are:
 
-The normal parser above is used on complete ELF images (the outer loader also uses it when inspecting other loaded libraries).
+```text
+#1 off 0x000000  VA 0x000000  filesz 0x4E29C0  memsz 0x4E29C0  R-X
+#2 off 0x4E29C0  VA 0x4E69C0  filesz 0x029DD8  memsz 0x02A640  RW-
+#3 off 0x50C7A0  VA 0x5147A0  filesz 0x022DC0  memsz 0x12E1F1  RW-
+```
 
-The protected inner module is different: its `dynstr`, `dynsym`, relocation arrays and dependency metadata are stored separately/encrypted by the outer library, while the recovered `0x530070` payload contains the mapped code/data image.
+The recovered original `PT_DYNAMIC` location is:
 
-Therefore the exact producer-side original `e_phoff`, program-header file offsets and dynamic-section virtual address are **not yet recovered** merely by reversing `C6F10..C7294`.
+```text
+file offset 0x505570
+VA          0x509570
+size        0x230
+```
 
-What is recovered exactly from the protected metadata is already sufficient to rebuild the important dynamic semantics:
+See `research/PROGRAM_HEADERS.md` for the complete table and validation.
+
+## Preserved Android note
+
+The PHDR table ends exactly at `0x238`, where the raw recovered file already contains a valid `PT_NOTE` payload.
+After restoring only the ELF header and PHDRs, standard tools decode that note as:
+
+```text
+Android API level 21
+NDK r25c
+build 9519653
+```
+
+This is an independent structural consistency check for the recovered header layout.
+
+## Dynamic metadata status
+
+The bytes currently present at the original `PT_DYNAMIC` file offset are not a plaintext standard dynamic table.
+The protector stores inner dynstr/dynsym/relocation/dependency information separately in encrypted outer tables, all of which are now recoverable offline.
+
+Recovered semantics include:
 
 ```text
 6837 dynamic symbols
-3749 .rela.dyn entries
-3097 .rela.plt entries
-10 external shared-library dependencies
+13896 R_AARCH64_RELATIVE fixups
+3272 R_AARCH64_ABS64 relocations
+477 R_AARCH64_GLOB_DAT relocations
+3097 R_AARCH64_JUMP_SLOT relocations
+10 exact dependency names/order
 SONAME libysmteam.so
 ```
 
-The ten dependency names appear contiguously in recovered dynstr before the SONAME:
+So the original dynamic-table **location and capacity** are recovered exactly, while its contents are reconstructed semantically rather than byte-for-byte.
 
-```text
-libdl.so
-libc.so
-libm.so
-liblog.so
-libandroid.so
-libEGL.so
-libGLESv2.so
-libGLESv3.so
-libGLESv1_CM.so
-libz.so
-```
+## Reconstruction tools
 
-The original `DT_NEEDED` ordering is strongly suggested by this ordering but should still be treated as reconstructed metadata rather than byte-for-byte original dynamic-section evidence.
-
-## Loader-shaped synthetic reconstruction
-
-`tools/build_inner_reconstructed_elf.py` takes the exact recovered inner image and metadata and adds a fourth synthetic metadata `PT_LOAD` above the recovered BSS range.
-
-It emits allocated:
-
-```text
-.dynstr
-.dynsym
-.hash
-.rela.dyn
-.rela.plt
-.dynamic
-```
-
-plus `PT_DYNAMIC` containing:
-
-```text
-DT_NEEDED x10
-DT_HASH
-DT_STRTAB
-DT_SYMTAB
-DT_STRSZ
-DT_SYMENT
-DT_RELA
-DT_RELASZ
-DT_RELAENT
-DT_PLTGOT
-DT_PLTRELSZ
-DT_PLTREL = DT_RELA
-DT_JMPREL
-DT_SONAME
-DT_NULL
-```
-
-The SysV `.hash` is regenerated from the recovered 6837-symbol dynsym table, allowing standard ELF tooling to perform symbol lookup without requiring the original stripped hash layout.
-
-Example:
+Conservative header restoration:
 
 ```bash
-python tools/build_inner_reconstructed_elf.py \
+python tools/recover_inner_phdrs.py libysmteam.so phdr_meta --strict-hash
+python tools/restore_inner_header.py \
+  ysm_inner_payload.bin phdr_meta/manifest.json ysm_inner.header_restored.so
+```
+
+The header-restored file preserves raw `PT_DYNAMIC` bytes and is useful for `readelf -h -l -n`.
+
+Near-original-layout semantic reconstruction:
+
+```bash
+python tools/build_inner_near_original_elf.py \
   ysm_inner_payload.bin \
-  ysm_inner.reconstructed.so \
-  --metadata-dir inner_meta
+  ysm_inner.near_original.so \
+  --metadata-dir inner_meta \
+  --phdr-manifest phdr_meta/manifest.json
 ```
 
-Validation on the current sample:
+This keeps the recovered original three-LOAD VA mapping and nine-entry PHDR shape. Recovered dynamic metadata is placed inside unused capacity of the original third LOAD's BSS range, so no synthetic fourth PT_LOAD is needed. The third LOAD `p_filesz` is extended, but its `p_memsz` and recovered virtual range are preserved.
 
-```text
-file -> ELF 64-bit LSB shared object, ARM aarch64, dynamically linked
-readelf -d -> 10 DT_NEEDED entries + SONAME libysmteam.so
-readelf -r -> 3749 .rela.dyn + 3097 .rela.plt entries
-```
-
-Synthetic metadata mapping used by the current tool:
-
-```text
-metadata PT_LOAD VA = 0x650000
-```
-
-This VA and the generated program headers are explicitly analyst reconstruction. The original file layout remains an open reconstruction problem.
+The result is still a semantic reconstruction rather than a byte-perfect producer ELF because `p_align`, `p_paddr`, original hash layout and exact dynamic-metadata placement were not retained by the protector.
