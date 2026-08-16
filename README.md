@@ -6,19 +6,19 @@ This repository intentionally does **not** include the original APK/SO binaries 
 
 ## Current checkpoint
 
-The important protection, metadata and loader-fixup stages are now reproducible offline:
+The important protection, metadata and loader stages are now reproducible offline:
 
 1. `base.apk` reaches `System.loadLibrary("ysmteam")` from the application's startup path.
 2. The native constructor decrypts outer `.main` at `VA 0xFBBAC`, size `0x2680`.
 3. The outer VM layer and its six protected streams are mapped.
-4. The exact `0x530070`-byte inner image is recovered offline through `B1E90`, ChaCha20 and zlib.
+4. The exact `0x530070`-byte inner raw file/image is recovered offline through `B1E90`, ChaCha20 and zlib.
 5. Encrypted inner `.dynstr`, `.dynsym`, PLT records and symbol-based relocation records are recoverable offline.
-6. Symbol relocations normalize to 3,272 `R_AARCH64_ABS64`, 477 `R_AARCH64_GLOB_DAT` and 3,097 `R_AARCH64_JUMP_SLOT` entries.
-7. A second runtime table contains 13,896 two-qword relative fixups applied by `C8DBC` before the symbol-based passes.
-8. The exact ten-library custom-loader dependency order is recovered from the outer SO's own RELATIVE relocation slots.
-9. Exact inner JNI exports are known, including `JNI_OnLoad @ 0x27C444` and `Java_com_ysmteam_imgui_GLES3JNIView_step @ 0x26FAF0`.
-10. `GLES3JNIView_step` calls the custom menu renderer at `0x27CAEC`.
-11. The outer normal-ELF parser (`C6F10/C6F90/C7028`) is mapped through PT_LOAD/PT_DYNAMIC and the relevant `DT_*` tags.
+6. Relocations normalize to 13,896 `R_AARCH64_RELATIVE`, 3,272 `R_AARCH64_ABS64`, 477 `R_AARCH64_GLOB_DAT` and 3,097 `R_AARCH64_JUMP_SLOT` entries.
+7. The exact ten-library custom-loader dependency order is recovered.
+8. Exact inner JNI exports are known, including `JNI_OnLoad @ 0x27C444` and `Java_com_ysmteam_imgui_GLES3JNIView_step @ 0x26FAF0`.
+9. `GLES3JNIView_step` calls the custom menu renderer at `0x27CAEC`.
+10. The protected compact inner program-header table is recovered: `e_phoff=0x40`, `e_phnum=9`, three original PT_LOAD mappings, PT_DYNAMIC, PT_PHDR, PT_NOTE, GNU_RELRO/EH_FRAME/STACK.
+11. Restoring only the header/PHDR region makes the preserved note identify Android API 21, NDK r25c, build 9519653.
 
 The repository is for reverse-engineering research and documentation. It does not contain an authentication-bypass patch.
 
@@ -61,56 +61,103 @@ cp inner_runtime/rela.relative.bin inner_meta/
 cp inner_runtime/needed.txt inner_meta/
 ```
 
-This recovers:
+This recovers 13,896 runtime relative fixups and the exact custom-loader dependency order:
 
 ```text
-13,896 runtime relative fixups
-exact custom-loader dependency order:
-  liblog.so
-  libandroid.so
-  libEGL.so
-  libGLESv2.so
-  libGLESv3.so
-  libGLESv1_CM.so
-  libz.so
-  libdl.so
-  libc.so
-  libm.so
+liblog.so
+libandroid.so
+libEGL.so
+libGLESv2.so
+libGLESv3.so
+libGLESv1_CM.so
+libz.so
+libdl.so
+libc.so
+libm.so
 ```
 
-### 4A. Build the conservative analysis ELF
+### 4. Recover the protected original-shape program headers
+
+```bash
+python tools/recover_inner_phdrs.py \
+  libysmteam.so \
+  phdr_meta \
+  --strict-hash
+```
+
+Recovered high-confidence ELF-header facts:
+
+```text
+e_phoff      0x40
+e_phentsize  0x38
+e_phnum      9
+PHDR end     0x238
+```
+
+Original load mappings:
+
+```text
+PT_LOAD  off 0x000000  VA 0x000000  filesz 0x4E29C0  memsz 0x4E29C0  R-X
+PT_LOAD  off 0x4E29C0  VA 0x4E69C0  filesz 0x029DD8  memsz 0x02A640  RW-
+PT_LOAD  off 0x50C7A0  VA 0x5147A0  filesz 0x022DC0  memsz 0x12E1F1  RW-
+```
+
+Original `PT_DYNAMIC` location:
+
+```text
+file offset 0x505570
+VA          0x509570
+size        0x230
+```
+
+### 5A. Header-only restoration
+
+```bash
+python tools/restore_inner_header.py \
+  ysm_inner_payload.bin \
+  phdr_meta/manifest.json \
+  ysm_inner.header_restored.so
+```
+
+This is useful for `readelf -h -l -n` and deliberately leaves the raw/protected `PT_DYNAMIC` bytes untouched.
+
+### 5B. Near-original-layout semantic reconstruction
+
+```bash
+python tools/build_inner_near_original_elf.py \
+  ysm_inner_payload.bin \
+  ysm_inner.near_original.so \
+  --metadata-dir inner_meta \
+  --phdr-manifest phdr_meta/manifest.json
+```
+
+This keeps the recovered original three-LOAD file-to-VA mapping and original nine-entry PHDR shape. Recovered dynstr/dynsym/hash/RELA data is placed in unused capacity of the original third LOAD's BSS range, so no synthetic fourth PT_LOAD is needed. Only that segment's `p_filesz` is extended; its recovered `p_memsz` and VA range are preserved.
+
+Validation on the mapped sample:
+
+```text
+file -> ELF 64-bit LSB shared object, ARM aarch64,
+        for Android 21, built by NDK r25c (9519653)
+
+readelf -d -> 10 DT_NEEDED + SONAME + reconstructed dynamic metadata
+readelf -r --use-dynamic -> 17,645 .rela.dyn + 3,097 .rela.plt entries
+```
+
+The result is a semantic reconstruction, not a byte-perfect producer ELF. The protected compact PHDR records do not retain `p_paddr`/`p_align`, and original hash/dynamic metadata placement is still not recovered.
+
+### Other analysis wrappers
 
 ```bash
 python tools/build_inner_analysis_elf.py \
-  ysm_inner_payload.bin \
-  ysm_inner.analysis.so \
+  ysm_inner_payload.bin ysm_inner.analysis.so \
   --metadata-dir inner_meta
-```
 
-### 4B. Build the loader-shaped reconstruction
-
-```bash
 python tools/build_inner_reconstructed_elf.py \
-  ysm_inner_payload.bin \
-  ysm_inner.reconstructed.so \
+  ysm_inner_payload.bin ysm_inner.reconstructed.so \
   --metadata-dir inner_meta
 ```
 
-When `rela.relative.bin` is present, the reconstructed `.rela.dyn` contains:
-
-```text
-13,896 R_AARCH64_RELATIVE
- 3,272 R_AARCH64_ABS64
-   477 R_AARCH64_GLOB_DAT
--------------------------
-17,645 .rela.dyn entries
-
-3,097 R_AARCH64_JUMP_SLOT in .rela.plt
-```
-
-The synthetic `.dynamic` also emits `DT_RELACOUNT=13896`, the recovered dependency order, SysV `.hash`, dynstr/dynsym, RELA tables and SONAME `libysmteam.so`.
-
-The generated metadata VA/program headers remain explicitly synthetic analysis reconstruction; they are not claimed to be the producer's original ELF file layout.
+The first is the conservative analysis wrapper; the second is the older loader-shaped synthetic reconstruction. The new `build_inner_near_original_elf.py` is preferred when preserving the recovered original file-to-VA layout matters.
 
 ## Other tools
 
@@ -142,11 +189,12 @@ DobbyHook                                          0x358CE8  size 0x158
 - `research/VM.md` — dispatcher/register/opcode checkpoint.
 - `research/INNER_LOADER.md` — descriptor, loader object and unpack path.
 - `research/B1E90.md` — white-box block transform and extraction validation.
-- `research/INNER_LAYOUT.md` — recovered memory-image boundaries and synthetic layout.
+- `research/INNER_LAYOUT.md` — earlier synthetic analysis layout.
 - `research/INNER_METADATA.md` — recovered dynstr/dynsym and exact JNI/PLT mapping.
 - `research/RELOCATIONS.md` — 40-byte custom symbol-relocation semantics.
 - `research/RUNTIME_FIXUPS.md` — 13,896 relative fixups, mapping-base/load-bias semantics and exact dependency order.
-- `research/ELF_PARSER.md` — normal ELF parser, PT_LOAD/PT_DYNAMIC and recovered `DT_*` semantics.
+- `research/ELF_PARSER.md` — normal outer ELF parser and corrected reconstruction status.
+- `research/PROGRAM_HEADERS.md` — recovered protected-inner PHDR table and corrected file-to-VA mappings.
 - `research/AUTH_FLOW.md` — menu/login data flow and remaining protocol questions.
 
 ## Sample hash
