@@ -13,9 +13,10 @@ What is reconstructed rather than byte-for-byte original:
 - dynamic-table contents
 - placement of recovered dynamic metadata
 
-The SysV hash buckets/chains used by the custom resolver are now recoverable
-exactly. They are still a protector-side lookup structure, not proof of the
-producer original `.gnu.hash` bytes.
+The exact SysV hash buckets/chains used by the custom resolver are recoverable.
+The surviving original shstrtab encodes both `.gnu.hash` and the suffix alias `.hash`,
+so the SysV table is now strong evidence for the original `.hash` semantics as well.
+The producer's original `.gnu.hash` bytes are still not recovered.
 
 Recovered metadata is placed into the original third PT_LOAD's former BSS space;
 that segment's p_filesz is extended, but p_memsz and all virtual addresses remain
@@ -187,7 +188,7 @@ def main()->int:
     with (md/'plt.tsv').open(encoding='utf-8') as f:
         rows=list(csv.DictReader(f,delimiter='\t'))
         if rows:
-            gotplt=min(int(r['target_offset'],16) for r in rows)
+            gotplt=min(int(r['target_offset'],16) for r in rows) - 3 * 8  # AArch64 .got.plt reserved qwords
     if gotplt is None:
         raise SystemExit('cannot determine DT_PLTGOT from plt.tsv')
 
@@ -266,7 +267,7 @@ def main()->int:
         'caveats':[
             'p_paddr and p_align are inferred because the compact protected PHDR records omit them',
             'the dynamic table and dynamic metadata placement are semantic reconstructions',
-            'when --aux-dir is used, the SysV bucket/chain contents exactly match the custom C8920 resolver but are not claimed to be the producer original .gnu.hash section',
+            'when --aux-dir is used, the SysV bucket/chain contents exactly match C8920; surviving shstrtab also encodes a .hash suffix alias, while original .gnu.hash bytes remain unrecovered',
             'the third PT_LOAD p_filesz is extended into its original BSS capacity to hold reconstructed metadata',
         ],
     }
