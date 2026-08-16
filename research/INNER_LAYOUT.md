@@ -32,9 +32,9 @@ The synthetic layout is therefore:
 
 `0x643000` is an inferred analysis boundary, chosen because decoded AArch64 references zero-filled globals into the `0x642xxx` page. It is not claimed to be the original ELF `p_memsz`.
 
-## Known symbols inserted by the wrapper
+## Known analyst labels
 
-The analysis ELF adds symbols only for already mapped anchors:
+The wrapper always adds already mapped anchors:
 
 ```text
 0x25E2E0  inner_code_start
@@ -54,11 +54,9 @@ The analysis ELF adds symbols only for already mapped anchors:
 0x5392A0  auth_busy
 ```
 
-These names are analyst labels rather than symbols recovered from the original dynamic symbol table.
+These are analyst labels. When recovered metadata is supplied, the generated ELF additionally receives exact dynamic-symbol and PLT names recovered from the outer loader's encrypted tables.
 
-## Build
-
-After extracting the raw inner image:
+## Basic build
 
 ```bash
 python tools/build_inner_analysis_elf.py ysm_inner_payload.bin ysm_inner.analysis.so
@@ -75,8 +73,41 @@ llvm-objdump -d --start-address=0x27caec --stop-address=0x27d040 ysm_inner.analy
 
 The generated ELF intentionally remains separate from `extract_inner.py`: extraction reproduces bytes, while this wrapper adds analyst metadata that is partly inferred.
 
+## Enrich with recovered original symbol names
+
+First recover the metadata stored separately by the outer loader:
+
+```bash
+python tools/recover_inner_symbols.py libysmteam.so inner_meta --strict-hash
+```
+
+Then build with the recovered TSV files:
+
+```bash
+python tools/build_inner_analysis_elf.py \
+  ysm_inner_payload.bin \
+  ysm_inner.analysis.so \
+  --metadata-dir inner_meta
+```
+
+For the mapped sample this adds thousands of real dynamic-symbol names plus all 3,097 PLT labels. For example:
+
+```text
+0x27C444  JNI_OnLoad
+0x26FAF0  Java_com_ysmteam_imgui_GLES3JNIView_step
+0x358CE8  DobbyHook
+0x4D6B50  clock_gettime
+0x4D6B60  glClearColor
+0x4D6B70  glClear
+0x4D6B80  glEnable
+0x4D6B90  glBlendFunc
+0x4D6BA0  glDisable
+```
+
+`llvm-objdump` then renders `0x26FAF0` under its exact JNI export name and resolves its direct calls through the PLT instead of showing anonymous trampoline addresses.
+
 ## Custom outer loader implication
 
 The outer loader still matters. Its normal ELF parser (`C6F90..C7290`) handles program headers/dynamic tags, while `C8920` resolves symbols and `C8FA8(..., "JNI_OnLoad")` requests the inner entry point. Several metadata buffers are lazily deobfuscated by `CB1D8`-based helpers before being stored into loader fields.
 
-Since the raw `0x530070`-byte image itself contains no literal ELF magic, the original inner ELF metadata is likely reconstructed/decrypted separately by the outer loader. The synthetic ELF is therefore a bridge for static analysis, not proof that original ELF reconstruction is complete.
+The recovered metadata now proves that the inner `JNI_OnLoad` is `0x27C444`, size `0x49C`. Since the raw `0x530070`-byte image itself contains no literal ELF magic, the producer's original ELF metadata was separated/reconstructed by the outer loader. The synthetic ELF remains a bridge for static analysis, not a byte-for-byte reconstruction of the original file.

@@ -6,20 +6,63 @@ This repository intentionally does **not** include the original APK/SO binaries 
 
 ## Current checkpoint
 
-The protection stack has been mapped far enough to reproduce several stages offline:
+The protection stack has been mapped far enough to reproduce the important static stages offline:
 
 1. `base.apk` reaches `System.loadLibrary("ysmteam")` from the application's startup path.
 2. The native constructor reads a `.ced` descriptor and decrypts `.main` at `VA 0xFBBAC`, size `0x2680`.
-3. The recovered outer RC4 key for this sample is `baa707fe71ef4dc2240c15c0b2d907da`.
-4. Plaintext `.main` exposes `JNI_OnLoad @ 0xFD214` and a second VM-based protection layer.
-5. Six virtualized functions and their VM streams have been mapped.
-6. The inner payload path uses a sample-specific pre-transform followed by ChaCha20 and zlib.
-7. The extracted `0x530070`-byte inner memory image contains Dear ImGui, OpenGL/EGL, Dobby, curl/OpenSSL and the custom login/menu implementation.
-8. The login data flow has been mapped through key input, worker creation, device-fingerprint/request construction and nonce validation.
+3. Plaintext `.main` exposes the outer `JNI_OnLoad @ 0xFD214` and a second VM-based protection layer.
+4. Six virtualized functions and their VM streams have been mapped.
+5. The inner payload path is reproduced offline through the white-box block stage, ChaCha20 and zlib.
+6. The exact `0x530070`-byte inner memory image is reproducible from the original SO without running the Android target.
+7. The outer loader's encrypted inner `.dynstr`, `.dynsym` and PLT relocation records are now recoverable offline.
+8. Exact inner JNI exports are known, including `JNI_OnLoad @ 0x27C444` and `Java_com_ysmteam_imgui_GLES3JNIView_step @ 0x26FAF0`.
+9. `GLES3JNIView_step` calls the mapped custom menu renderer at `0x27CAEC` and its OpenGL imports can be named from the recovered PLT records.
 
 The repository is for reverse-engineering research and documentation. It does not contain an authentication-bypass patch.
 
 ## Tools
+
+### Extract the inner image from the original SO
+
+```bash
+pip install unicorn
+python tools/extract_inner.py libysmteam.so ysm_inner_payload.bin
+```
+
+For the mapped sample, the recovered inner image is `0x530070` bytes with SHA-256:
+
+```text
+5a0ff6b4e1d3bf811dbd1f2b5db3e48ae14c12fb6da5f5662bf2e3c7bd66f168
+```
+
+### Recover inner symbols and PLT names
+
+```bash
+python tools/recover_inner_symbols.py libysmteam.so inner_meta --strict-hash --dump-raw
+```
+
+This reproduces the fixed metadata seed, decrypts the embedded inner dynstr/dynsym and the custom PLT record array, and writes:
+
+```text
+inner_meta/manifest.json
+inner_meta/dynsym.tsv
+inner_meta/plt.tsv
+```
+
+The mapped sample yields 6,837 dynamic symbols and 3,097 `R_AARCH64_JUMP_SLOT` PLT records.
+
+### Build an analysis-friendly inner ELF
+
+The extracted payload is a raw reconstructed memory/container image rather than the producer's original ELF file. Wrap it in a synthetic `ET_DYN` for Ghidra/IDA/llvm-objdump:
+
+```bash
+python tools/build_inner_analysis_elf.py \
+  ysm_inner_payload.bin \
+  ysm_inner.analysis.so \
+  --metadata-dir inner_meta
+```
+
+With `--metadata-dir`, the wrapper adds recovered inner dynsym names and exact PLT labels. The generated section/program-header layout is analyst metadata and must not be confused with the original ELF layout.
 
 ### Decrypt outer `.main`
 
@@ -27,55 +70,23 @@ The repository is for reverse-engineering research and documentation. It does no
 python tools/decrypt_outer_main.py libysmteam.so libysmteam.main_decrypted.so
 ```
 
-The script patches only the encrypted `.main` range in a copy of the input file.
-
 ### Extract VM bytecode
 
 ```bash
 python tools/dump_vm.py libysmteam.so vm_dump
 ```
 
-This writes the six mapped bytecode blobs plus `manifest.json`.
-
-### Extract the inner payload directly from the original SO
-
-The white-box `B1E90` stage is now reproduced offline, so the complete inner
-payload can be extracted without running Android or dumping process memory:
+### Run the white-box block emulator directly
 
 ```bash
-python tools/extract_inner.py libysmteam.so ysm_inner_payload.bin
+python tools/emulate_b1e90.py libysmteam.so input.bin output.bin
 ```
 
-Optional intermediate dumps:
-
-```bash
-python tools/extract_inner.py libysmteam.so ysm_inner_payload.bin --work-dir work
-```
-
-The `B1E90` emulator uses the Python `unicorn` package (`pip install unicorn`).
-The ChaCha20 stage uses `cryptography` when available and falls back to the bundled
-pure-Python implementation.
-
-For the checkpoint sample the final inner image is `0x530070` bytes with SHA-256
-`5a0ff6b4e1d3bf811dbd1f2b5db3e48ae14c12fb6da5f5662bf2e3c7bd66f168`.
-
-### Run the B1E90 stage separately
-
-```bash
-python tools/emulate_b1e90.py libysmteam.so small_cipher.bin small_plain.bin
-```
-
-See `research/B1E90.md` for the emulated instruction subset and validation hashes.
-
-### Decrypt the reconstructed inner combined stream
-
-After reproducing the earlier sample-specific small-blob pre-transform and assembling the combined ChaCha20 ciphertext:
+### Decrypt a reconstructed inner combined stream
 
 ```bash
 python tools/decrypt_inner_combined.py combined.bin inner_payload.bin
 ```
-
-The script includes an RFC 8439 ChaCha20 self-test and validates the expected `uint32_le size + zlib stream` framing.
 
 ### Scan an extracted inner image
 
@@ -83,14 +94,28 @@ The script includes an RFC 8439 ChaCha20 self-test and validates the expected `u
 python tools/scan_inner.py inner_payload.bin
 ```
 
-This reports known framework markers and sample offsets used by the research notes.
+## Exact inner entry points recovered so far
+
+```text
+JNI_OnLoad                                      0x27C444  size 0x49C
+Java_com_ysmteam_imgui_GLES3JNIView_init        0x26931C  size 0x6774
+Java_com_ysmteam_imgui_GLES3JNIView_resize      0x26FA90  size 0x60
+Java_com_ysmteam_imgui_GLES3JNIView_step        0x26FAF0  size 0x380
+Java_com_ysmteam_imgui_GLES3JNIView_imgui_Shutdown 0x26FE70 size 0x3C
+Java_com_ysmteam_imgui_GLES3JNIView_getWindowRect  0x26FEAC size 0x220
+Java_com_ysmteam_imgui_GLES3JNIView_onTouch     0x2700CC  size 0xAC
+DobbyHook                                       0x358CE8  size 0x158
+```
 
 ## Research notes
 
 - `research/CHECKPOINT.md` — high-level checkpoint.
 - `research/ADDRESS_MAP.md` — outer, VM and inner-image address map.
 - `research/VM.md` — dispatcher, register encoding and opcode checkpoint.
-- `research/B1E90.md` — concrete emulation of the white-box block transform and end-to-end validation.
+- `research/INNER_LOADER.md` — descriptor, loader object and unpack path.
+- `research/B1E90.md` — white-box block transform and end-to-end extraction validation.
+- `research/INNER_LAYOUT.md` — synthetic analysis layout for the recovered memory image.
+- `research/INNER_METADATA.md` — recovered dynstr/dynsym, exact JNI exports and PLT mapping.
 - `research/AUTH_FLOW.md` — menu/login data flow and remaining protocol questions.
 
 ## Sample hashes

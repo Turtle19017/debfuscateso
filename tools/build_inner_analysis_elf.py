@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import argparse, struct
+import argparse, csv, struct
 from pathlib import Path
 
 ET_DYN=3; EM_AARCH64=183; EV_CURRENT=1
@@ -46,30 +46,67 @@ def pack_phdr(flags, off, va, filesz, memsz, alignv=0x1000):
 def pack_shdr(name, typ, flags, addr, off, size, link=0, info=0, addralign=1, entsize=0):
     return struct.pack('<IIQQQQIIQQ', name, typ, flags, addr, off, size, link, info, addralign, entsize)
 
+def section_for_value(value):
+    if 0 <= value < RO_END: return 1
+    if RO_END <= value < TEXT_END: return 2
+    if TEXT_END <= value < PLT_END: return 3
+    if PLT_END <= value < MEM_END:
+        return 4 if value < 0x530070 else 5
+    return 0
+
+def load_recovered_symbols(metadata_dir):
+    """Load dynsym.tsv/plt.tsv produced by recover_inner_symbols.py."""
+    if not metadata_dir:
+        return []
+    d=Path(metadata_dir)
+    extra=[]
+    with (d/'dynsym.tsv').open(encoding='utf-8') as f:
+        for row in csv.DictReader(f, delimiter='\t'):
+            name=row['name']
+            value=int(row['value'],16)
+            size=int(row['size'],16)
+            typ=int(row['type'])
+            if not name or value == 0 or not (0 <= value < MEM_END):
+                continue
+            shndx=section_for_value(value)
+            if not shndx:
+                continue
+            extra.append((name,value,size,typ,shndx))
+    with (d/'plt.tsv').open(encoding='utf-8') as f:
+        for row in csv.DictReader(f, delimiter='\t'):
+            name=row['symbol_name']
+            value=int(row['plt_address'],16)
+            if not name or not (TEXT_END <= value < PLT_END):
+                continue
+            extra.append((name,value,0x10,STT_FUNC,3))
+    return extra
+
 def main():
     ap=argparse.ArgumentParser(description='Wrap recovered YSM inner memory image in a synthetic AArch64 ELF for analysis.')
     ap.add_argument('input'); ap.add_argument('output')
+    ap.add_argument('--metadata-dir', help='directory from recover_inner_symbols.py; adds recovered dynsym and PLT labels')
     args=ap.parse_args()
     payload=Path(args.input).read_bytes()
     if len(payload)!=0x530070:
         print(f'[!] warning: expected sample size 0x530070, got 0x{len(payload):x}')
     if len(payload)>MEM_END: raise SystemExit('payload larger than configured synthetic memory end')
 
-    # Section-name table.
     secnames=['', '.blob', '.text', '.plt', '.data', '.bss', '.strtab', '.symtab', '.shstrtab']
     shstr=bytearray(b'\x00'); nameoff={'':0}
     for s in secnames[1:]: nameoff[s]=len(shstr); shstr += s.encode()+b'\x00'
 
-    # Symbol string table and symbols.
+    all_symbols=list(KNOWN_SYMBOLS) + load_recovered_symbols(args.metadata_dir)
     strtab=bytearray(b'\x00'); symname={}
-    for n,*_ in KNOWN_SYMBOLS: symname[n]=len(strtab); strtab += n.encode()+b'\x00'
+    def intern(name):
+        if name not in symname:
+            symname[name]=len(strtab); strtab.extend(name.encode('utf-8',errors='replace')+b'\x00')
+        return symname[name]
     syms=[b'\x00'*24]
-    for n,val,size,typ,shndx in KNOWN_SYMBOLS:
-        info=(STB_GLOBAL<<4)|typ
-        syms.append(struct.pack('<IBBHQQ', symname[n], info, 0, shndx, val, size))
+    for n,val,size,typ,shndx in all_symbols:
+        info=(STB_GLOBAL<<4)|(typ & 0xF)
+        syms.append(struct.pack('<IBBHQQ', intern(n), info, 0, shndx, val, size))
     symtab=b''.join(syms)
 
-    # File layout: ELF metadata, padding to 0x1000, recovered bytes, then non-loaded analysis metadata.
     data=bytearray(PAYLOAD_OFF)
     data += payload
     strtab_off=align(len(data),8); data += b'\x00'*(strtab_off-len(data)); data += strtab
@@ -106,5 +143,6 @@ def main():
     print(f'    .plt                : 0x{TEXT_END:x}..0x{PLT_END:x}')
     print(f'    file-backed end     : 0x{len(payload):x}')
     print(f'    synthetic memory end: 0x{MEM_END:x}')
+    print(f'    symbols             : {len(all_symbols)}')
 
 if __name__=='__main__': main()
