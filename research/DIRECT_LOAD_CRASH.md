@@ -96,3 +96,31 @@ python tools/fix_inner_abs64_addends.py \
 ```
 
 Then rebuild the original-placement ELF with the existing builder. For the mapped sample the helper validates the `0x5241C8` crash anchor and should produce the corrected `dl_iterate_phdr` addend shown above.
+
+## v3 follow-up: verify the exact installed build before interpreting the next PC
+
+A later test report showed the original SIGBUS disappearing and a new `strlen(NULL)`-looking tombstone with module-relative PCs near `0x287410` / `0x287F34`. Before assigning semantics to that report, the exact installed library must be hash-checked.
+
+The supplied v3 reconstruction is:
+
+```text
+sha256 = 5bb1dc65600331fee38e11a1815054a1b14ace93c206ce19521b42abb5560ba1
+JNI_OnLoad dynsym value = 0x27C444
+JNI_OnLoad size         = 0x49C
+```
+
+For that exact file:
+
+```text
+VA 0x28740C = 61ffff54  -> b.ne ...
+VA 0x287410 = f60313aa  -> mov x22, x19
+VA 0x287F30 = e20315aa  -> mov x2, x21
+VA 0x287F34 = e3031faa  -> mov x3, xzr
+VA 0x287F38 = de070094  -> bl 0x289eb0
+```
+
+Also, `JNI_OnLoad + 180 decimal` is `0x27C4F8`, not `0x287F34`.
+
+Therefore a tombstone that identifies `0x287F34` as `JNI_OnLoad+180`, or whose `strlen` caller return PC is `0x287410`, does not byte-match the supplied v3 image. Possible explanations include a stale APK/native-library extraction, a different rebuilt file, or manually summarized symbol text that no longer corresponds exactly to the raw tombstone.
+
+Use `tools/check_inner_crash_pc.py` to validate local PCs against the exact ELF before continuing call-graph analysis.
