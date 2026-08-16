@@ -1,28 +1,73 @@
 # debfuscateso
 
-Static reverse-engineering notes and small reproducible tools for the analyzed `libysmteam.so` ARM64 Android library.
+Static reverse-engineering notes and reproducible helpers for the analyzed ARM64 Android `libysmteam.so` sample.
 
-This repository intentionally does **not** include the original APK/SO binaries. Tools operate on a local copy supplied by the researcher.
+This repository intentionally does **not** include the original APK/SO binaries or extracted payloads. The tools operate on local researcher-supplied files.
 
 ## Current checkpoint
 
-The outer library has been mapped far enough to reproduce several protection layers offline:
+The protection stack has been mapped far enough to reproduce several stages offline:
 
-1. `base.apk` loads `libysmteam.so` through `System.loadLibrary("ysmteam")` from `FFAPI.load_lib()`.
-2. The library constructor reads a `.ced` descriptor and decrypts `.main` at `VA 0xFBBAC`, size `0x2680`.
-3. The recovered RC4 key for this sample is `baa707fe71ef4dc2240c15c0b2d907da`.
-4. Decrypted `.main` exposes `JNI_OnLoad @ 0xFD214` and a second VM-based protection layer.
-5. Six virtualized functions and their bytecode streams have been mapped.
-6. The inner payload path uses a small pre-transform, ChaCha20 and zlib. The recovered ChaCha20 parameters are documented in `research/CHECKPOINT.md`.
-7. The extracted inner memory image contains Dear ImGui, OpenGL/EGL, Dobby, curl/OpenSSL and the custom login/menu code.
+1. `base.apk` reaches `System.loadLibrary("ysmteam")` from the application's startup path.
+2. The native constructor reads a `.ced` descriptor and decrypts `.main` at `VA 0xFBBAC`, size `0x2680`.
+3. The recovered outer RC4 key for this sample is `baa707fe71ef4dc2240c15c0b2d907da`.
+4. Plaintext `.main` exposes `JNI_OnLoad @ 0xFD214` and a second VM-based protection layer.
+5. Six virtualized functions and their VM streams have been mapped.
+6. The inner payload path uses a sample-specific pre-transform followed by ChaCha20 and zlib.
+7. The extracted `0x530070`-byte inner memory image contains Dear ImGui, OpenGL/EGL, Dobby, curl/OpenSSL and the custom login/menu implementation.
+8. The login data flow has been mapped through key input, worker creation, device-fingerprint/request construction and nonce validation.
 
-The work here is for analysis and documentation. It does not include an authentication-bypass patch.
+The repository is for reverse-engineering research and documentation. It does not contain an authentication-bypass patch.
 
 ## Tools
 
-- `tools/decrypt_outer_main.py` — patch the encrypted `.main` range in a local copy of the original SO.
-- `tools/dump_vm.py` — extract the six VM bytecode programs from the original SO.
-- `tools/decrypt_inner_combined.py` — ChaCha20 + zlib stage for a reconstructed combined inner stream.
-- `tools/scan_inner.py` — sanity-check an extracted inner payload and report known markers/offsets.
+### Decrypt outer `.main`
 
-See `research/CHECKPOINT.md` for the current address map and corrections discovered during analysis.
+```bash
+python tools/decrypt_outer_main.py libysmteam.so libysmteam.main_decrypted.so
+```
+
+The script patches only the encrypted `.main` range in a copy of the input file.
+
+### Extract VM bytecode
+
+```bash
+python tools/dump_vm.py libysmteam.so vm_dump
+```
+
+This writes the six mapped bytecode blobs plus `manifest.json`.
+
+### Decrypt the reconstructed inner combined stream
+
+After reproducing the earlier sample-specific small-blob pre-transform and assembling the combined ChaCha20 ciphertext:
+
+```bash
+python tools/decrypt_inner_combined.py combined.bin inner_payload.bin
+```
+
+The script includes an RFC 8439 ChaCha20 self-test and validates the expected `uint32_le size + zlib stream` framing.
+
+### Scan an extracted inner image
+
+```bash
+python tools/scan_inner.py inner_payload.bin
+```
+
+This reports known framework markers and sample offsets used by the research notes.
+
+## Research notes
+
+- `research/CHECKPOINT.md` — high-level checkpoint.
+- `research/ADDRESS_MAP.md` — outer, VM and inner-image address map.
+- `research/VM.md` — dispatcher, register encoding and opcode checkpoint.
+- `research/AUTH_FLOW.md` — menu/login data flow and remaining protocol questions.
+
+## Sample hashes
+
+The original analyzed `libysmteam.so` has SHA-256:
+
+```text
+acdd435cad4a6c55ee47babd8d3fb6da4bc99ef8f1be6f573921a9b95d8bb5ca
+```
+
+Use hashes and address maps together: most offsets in this repository are sample-specific.
