@@ -16,8 +16,11 @@ For the mapped sample, the important stages are reproducible offline:
 - exact custom resolver SysV bucket/chain tables (`6837/6837`);
 - exact `.init_array` / `.fini_array` metadata;
 - protected original-shape program headers: `e_phoff=0x40`, `e_phnum=9`, three original PT_LOAD mappings and original PT_DYNAMIC/PT_NOTE/GNU_RELRO/EH_FRAME/STACK roles;
-- high-confidence original section boundaries, including `.gcc_except_table`, `.rodata`, `.eh_frame_hdr`, `.eh_frame`, `.text`, `.plt`, `.data.rel.ro`, constructor arrays, `.dynamic`, `.got`, `.got.plt`, `.data`, `.bss`, `.comment` and `.shstrtab`;
-- strong original section-table shape evidence: candidate `e_shoff=0x52F9B0`, `e_shentsize=0x40`, candidate `e_shnum=27`.
+- original low dynamic-section placement recovered from `.dynsym` through `.rela.plt`;
+- GNU-version tables survive parseably, and the original GNU-hash header is recovered as `nbuckets=1625`, `symoffset=336`, `bloom_size=2048`, `bloom_shift=26`;
+- corrected `.gcc_except_table` start `0xED3B0` and exact following `.rodata`/EH/text/PLT layout;
+- full 27-entry semantic section-table reconstruction at `e_shoff=0x52F9B0`, `e_shnum=27`, `e_shstrndx=26`;
+- original-placement semantic ELF reconstruction that stays exactly `0x530070` bytes instead of appending metadata into BSS.
 
 Known inner image:
 
@@ -61,53 +64,91 @@ python tools/recover_inner_aux_metadata.py \
   --metadata-dir inner_meta \
   --strict-hash
 
-python tools/recover_inner_section_facts.py \
+python tools/recover_inner_original_layout.py \
   ysm_inner_payload.bin \
-  section_facts \
-  --phdr-manifest phdr_meta/manifest.json \
+  original_layout \
   --metadata-dir inner_meta \
   --aux-dir inner_aux
 
-python tools/recover_exception_sections.py \
+python tools/build_inner_original_placement_elf.py \
   ysm_inner_payload.bin \
-  --json exception_sections.json
-
-python tools/build_inner_near_original_elf.py \
-  ysm_inner_payload.bin \
-  ysm_inner.near_original.so \
+  ysm_inner.original_placement.so \
   --metadata-dir inner_meta \
+  --aux-dir inner_aux \
   --phdr-manifest phdr_meta/manifest.json \
-  --aux-dir inner_aux
+  --layout-manifest original_layout/original_layout.json
 ```
 
-## Important recovered layout
+The older analysis/near-original builders are still useful when experimenting, but `build_inner_original_placement_elf.py` is now the preferred reconstruction for this mapped sample.
+
+## Recovered original section layout
 
 ```text
-.gcc_except_table  0x0ED59C .. 0x0F5EB0  size 0x008914
-.rodata             0x0F5EB0 .. 0x1FFAFC  size 0x109C4C
-.eh_frame_hdr       0x1FFAFC .. 0x2125F0  size 0x012AF4
-.eh_frame           0x2125F0 .. 0x25E2D4  size 0x04BCE4
-.text               0x25E2E0 .. 0x4D6810
-.plt                0x4D6810 .. 0x4E29C0
+.note.android.ident  0x000238 .. 0x0002D0
+.dynsym              0x0002D0 .. 0x0283C8  size 0x280F8
+.gnu.version         0x0283C8 .. 0x02B932  size 0x356A
+.gnu.version_r       0x02B934 .. 0x02B994  size 0x60
+.gnu.hash            0x02B998 .. 0x0378A0  size 0xBF08
+.hash                0x0378A0 .. 0x044E50  size 0xD5B0
+.dynstr              0x044E50 .. 0x073B1D  size 0x2ECCD
+.rela.dyn            0x073B20 .. 0x0DB158  size 0x67638
+.rela.plt            0x0DB158 .. 0x0ED3B0  size 0x12258
+.gcc_except_table    0x0ED3B0 .. 0x0F5EB0  size 0x8B00
+.rodata              0x0F5EB0 .. 0x1FFAFC  size 0x109C4C
+.eh_frame_hdr        0x1FFAFC .. 0x2125F0
+.eh_frame            0x2125F0 .. 0x25E2D4
+.text                0x25E2E0 .. 0x4D6810
+.plt                 0x4D6810 .. 0x4E29C0
 
-.data.rel.ro        0x4E69C0 .. 0x509530
-.fini_array         0x509530 .. 0x509540
-.init_array         0x509540 .. 0x509570
-.dynamic            0x509570 .. 0x5097A0
-.got                0x5097A0 .. 0x50A6B8
-.got.plt            0x50A6B8 .. 0x510798
-.relro_padding      0x510798 .. 0x511000
-.data               0x5147A0 .. 0x537560
-.bss                0x537560 .. 0x642991
+.data.rel.ro         0x4E69C0 .. 0x509530
+.fini_array          0x509530 .. 0x509540
+.init_array          0x509540 .. 0x509570
+.dynamic             0x509570 .. 0x5097A0
+.got                 0x5097A0 .. 0x50A6B8
+.got.plt             0x50A6B8 .. 0x510798
+.relro_padding       0x510798 .. 0x511000
+.data                0x5147A0 .. 0x537560
+.bss                 0x537560 .. 0x642991
 
 .comment        file 0x52F560 .. 0x52F8AA
 .shstrtab       file 0x52F8AA .. 0x52F9AA
-Shdr-tail       file 0x52F9B0 .. 0x530070 = 0x6C0 = 27 * 0x40
+section headers file 0x52F9B0 .. 0x530070 = 27 * 0x40
 ```
 
-A correction from an earlier checkpoint: the surviving `.shstrtab` stores `.gnu.hash`, but ELF section names can point into the middle of another string. The suffix `.hash` is therefore a valid name at an interior string-table offset, just as `.plt` is encoded as a suffix of `.got.plt`. The 24 standalone names + `.plt` + `.hash` + NULL give exactly 27 section-name slots, matching the `0x6C0` destroyed section-header tail.
+The earlier `0xED59C` value is retained only as the **minimum LSDA referenced by an FDE**. It is not the section start; the true `.gcc_except_table` begins at `0xED3B0`, immediately after the recovered `.rela.plt` extent.
 
-The exact custom SysV hash table recovered from the outer resolver is therefore strong evidence for original `.hash` semantics as well; the producer's original `.gnu.hash` bytes are still not recovered.
+The surviving `.shstrtab` stores `.gnu.hash` and `.got.plt`; ELF section names can point into the middle of another string, so `.hash` and `.plt` are valid suffix names. The 24 standalone names + `.hash` + `.plt` + NULL give exactly 27 sections, matching the surviving `0x6C0` section-header tail.
+
+## Original-placement reconstruction validation
+
+The current builder restores/regenerates dynamic metadata at the recovered original file positions instead of extending BSS:
+
+```text
+.dynsym      file/VA 0x0002D0
+.gnu.version file/VA 0x0283C8  (surviving bytes preserved)
+.gnu.version_r       0x02B934  (surviving bytes preserved)
+.gnu.hash            0x02B998  (regenerated from recovered header + dynsym/dynstr)
+.hash                0x0378A0  (exact recovered SysV resolver table)
+.dynstr              0x044E50
+.rela.dyn            0x073B20
+.rela.plt            0x0DB158
+.dynamic       file  0x505570 / VA 0x509570
+section headers file 0x52F9B0
+```
+
+On the mapped sample:
+
+```text
+file       -> ELF64 AArch64 shared object, Android 21, NDK r25c
+readelf -h -> 9 program headers, 27 section headers
+readelf -S -> coherent recovered section map
+readelf -V -> 6837 version symbols + 3 version-needed records
+readelf -I -> valid SysV and GNU hash histograms
+readelf -d -> 33 reconstructed dynamic entries at original PT_DYNAMIC
+readelf -r --use-dynamic -> 17645 .rela.dyn + 3097 .rela.plt
+```
+
+This is still called a **semantic reconstruction**, not a byte-perfect producer file: protected bytes such as original hash bodies/dynamic entries/SHDR fields were destroyed or scrambled, so those are regenerated from recovered semantics where necessary.
 
 ## Exact inner entry points
 
@@ -139,6 +180,7 @@ DobbyHook                                          0x358CE8  size 0x158
 - `research/HASH_AND_ARRAYS.md`
 - `research/SECTION_FACTS.md`
 - `research/EXCEPTION_SECTIONS.md`
+- `research/ORIGINAL_SECTION_LAYOUT.md`
 - `research/AUTH_FLOW.md`
 
 Original analyzed `libysmteam.so` SHA-256:
