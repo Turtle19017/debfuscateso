@@ -4,45 +4,54 @@ import argparse, json, struct
 from pathlib import Path
 
 ET_DYN=3; EM_AARCH64=183; EV_CURRENT=1
-SHT_NULL=0; SHT_PROGBITS=1; SHT_STRTAB=3; SHT_RELA=4; SHT_HASH=5; SHT_DYNAMIC=6; SHT_NOTE=7; SHT_NOBITS=8; SHT_DYNSYM=11; SHT_INIT_ARRAY=14; SHT_FINI_ARRAY=15
-SHT_GNU_HASH=0x6ffffff6; SHT_GNU_VERNEED=0x6ffffffe; SHT_GNU_VERSYM=0x6fffffff
+PT_LOAD=1
+SHT_NULL=0; SHT_PROGBITS=1; SHT_STRTAB=3; SHT_RELA=4; SHT_HASH=5; SHT_DYNAMIC=6; SHT_NOTE=7; SHT_NOBITS=8; SHT_INIT_ARRAY=14; SHT_FINI_ARRAY=15; SHT_DYNSYM=11
+SHT_GNU_HASH=0x6ffffff6; SHT_GNU_VERDEF=0x6ffffffd; SHT_GNU_VERNEED=0x6ffffffe; SHT_GNU_VERSYM=0x6fffffff
 SHF_WRITE=1; SHF_ALLOC=2; SHF_EXECINSTR=4; SHF_MERGE=0x10; SHF_STRINGS=0x20; SHF_INFO_LINK=0x40
 DT_NULL=0; DT_NEEDED=1; DT_PLTRELSZ=2; DT_PLTGOT=3; DT_HASH=4; DT_STRTAB=5; DT_SYMTAB=6; DT_RELA=7; DT_RELASZ=8; DT_RELAENT=9; DT_STRSZ=10; DT_SYMENT=11; DT_SONAME=14
-DT_PLTREL=20; DT_JMPREL=23; DT_INIT_ARRAY=25; DT_FINI_ARRAY=26; DT_INIT_ARRAYSZ=27; DT_FINI_ARRAYSZ=28
-DT_GNU_HASH=0x6ffffef5; DT_VERSYM=0x6ffffff0; DT_RELACOUNT=0x6ffffff9; DT_VERNEED=0x6ffffffe; DT_VERNEEDNUM=0x6fffffff
+DT_INIT_ARRAY=25; DT_FINI_ARRAY=26; DT_INIT_ARRAYSZ=27; DT_FINI_ARRAYSZ=28; DT_FLAGS=30; DT_PLTREL=20; DT_JMPREL=23
+DT_GNU_HASH=0x6ffffef5; DT_VERSYM=0x6ffffff0; DT_FLAGS_1=0x6ffffffb; DT_RELACOUNT=0x6ffffff9; DT_VERNEED=0x6ffffffe; DT_VERNEEDNUM=0x6fffffff
+DF_BIND_NOW=0x8; DF_1_NOW=0x1
 
 def align(v,a): return (v+a-1)&~(a-1)
+
 def cstr(buf,off):
     e=buf.find(b'\0',off); return buf[off:e]
-def gnu_hash(name):
+
+def gnu_hash(name:bytes)->int:
     h=5381
     for c in name: h=(h*33+c)&0xffffffff
     return h
 
 def build_gnu_hash(dynsym,dynstr,nb,symoff,bloom_size,bloom_shift):
-    n=len(dynsym)//24; bits=64
-    bloom=[0]*bloom_size; buckets=[0]*nb; chains=[0]*(n-symoff); seen=set(); last=None
+    n=len(dynsym)//24; elfclass_bits=64
+    bloom=[0]*bloom_size; buckets=[0]*nb; chains=[0]*(n-symoff)
+    last_bucket=None; seen=set()
     for i in range(symoff,n):
         st_name=struct.unpack_from('<I',dynsym,i*24)[0]; name=cstr(dynstr,st_name); h=gnu_hash(name); b=h%nb
-        if b!=last:
+        if b!=last_bucket:
             if b in seen: raise ValueError('dynsym order is not GNU-hash bucket contiguous')
-            seen.add(b); last=b
+            seen.add(b); last_bucket=b
             if buckets[b]==0: buckets[b]=i
-        word=(h//bits)%bloom_size; bloom[word]|=(1<<(h%bits))|(1<<((h>>bloom_shift)%bits)); chains[i-symoff]=h&0xfffffffe
+        word=(h//elfclass_bits)%bloom_size; bit1=h%elfclass_bits; bit2=(h>>bloom_shift)%elfclass_bits
+        bloom[word] |= (1<<bit1)|(1<<bit2)
+        chains[i-symoff]=h & 0xfffffffe
     for i in range(symoff,n):
         h=gnu_hash(cstr(dynstr,struct.unpack_from('<I',dynsym,i*24)[0])); b=h%nb
         if i==n-1:
             chains[i-symoff]|=1
         else:
-            h2=gnu_hash(cstr(dynstr,struct.unpack_from('<I',dynsym,(i+1)*24)[0]))
-            if h2%nb!=b: chains[i-symoff]|=1
+            h2=gnu_hash(cstr(dynstr,struct.unpack_from('<I',dynsym,(i+1)*24)[0]));
+            if h2%nb != b: chains[i-symoff]|=1
     return struct.pack('<IIII',nb,symoff,bloom_size,bloom_shift)+struct.pack(f'<{bloom_size}Q',*bloom)+struct.pack(f'<{nb}I',*buckets)+struct.pack(f'<{len(chains)}I',*chains)
 
 def pack_ehdr(phoff,phnum,shoff,shnum,shstrndx):
     ident=bytearray(16); ident[:4]=b'\x7fELF'; ident[4]=2; ident[5]=1; ident[6]=1
     return bytes(ident)+struct.pack('<HHIQQQIHHHHHH',ET_DYN,EM_AARCH64,EV_CURRENT,0,phoff,shoff,0,64,56,phnum,64,shnum,shstrndx)
+
 def pack_phdr(r):
     return struct.pack('<IIQQQQQQ',r['p_type'],r['p_flags'],r['p_offset'],r['p_vaddr'],r['p_paddr_inferred'],r['p_filesz'],r['p_memsz'],r['p_align_inferred'])
+
 def pack_shdr(name,typ,flags,addr,off,size,link=0,info=0,alignv=1,entsize=0):
     return struct.pack('<IIQQQQIIQQ',name,typ,flags,addr,off,size,link,info,alignv,entsize)
 
@@ -56,27 +65,57 @@ def main():
     dynsym=(md/'dynsym.bin').read_bytes(); dynstr=(md/'dynstr.bin').read_bytes(); rela_sym=(md/'rela.dyn.bin').read_bytes(); rela_rel=(md/'rela.relative.bin').read_bytes(); rela_plt=(md/'rela.plt.bin').read_bytes()
     needed=[x.strip() for x in (md/'needed.txt').read_text().splitlines() if x.strip()]
     hsys=(args.aux_dir/'hash.sysv.bin').read_bytes(); aux=json.loads((args.aux_dir/'aux_metadata.json').read_text())
-    ph=json.loads(args.phdr_manifest.read_text()); layout=json.loads(args.layout_manifest.read_text()); sec={x['name']:x for x in layout['sections']}
-    gh=layout['gnu_hash_header']; ghash=build_gnu_hash(dynsym,dynstr,gh['nbucket'],gh['symoffset'],gh['bloom_size'],gh['bloom_shift']); rela_dyn=rela_rel+rela_sym
+    ph=json.loads(args.phdr_manifest.read_text()); layout=json.loads(args.layout_manifest.read_text())
+    sec={x['name']:x for x in layout['sections']}
+    gh=layout['gnu_hash_header']; ghash=build_gnu_hash(dynsym,dynstr,gh['nbucket'],gh['symoffset'],gh['bloom_size'],gh['bloom_shift'])
+    if len(ghash)!=sec['.gnu.hash']['size']: raise SystemExit('GNU hash size mismatch')
+    rela_dyn=rela_rel+rela_sym
+
+    raw_ghash=bytes(raw[sec['.gnu.hash']['start']:sec['.gnu.hash']['end']])
+    bloom_end=16+gh['bloom_size']*8
+    buckets_end=bloom_end+gh['nbucket']*4
+    if raw_ghash[:16] != ghash[:16]: raise SystemExit('surviving GNU hash header mismatch')
+    if raw_ghash[16:bloom_end] != ghash[16:bloom_end]: raise SystemExit('surviving GNU hash bloom mismatch')
+    chain_words=(len(ghash)-buckets_end)//4; suffix=0
+    for i in range(chain_words-1,-1,-1):
+        a=raw_ghash[buckets_end+i*4:buckets_end+(i+1)*4]; b=ghash[buckets_end+i*4:buckets_end+(i+1)*4]
+        if a != b: break
+        suffix += 1
+    if suffix < 336: raise SystemExit(f'GNU hash surviving chain suffix too short: {suffix}')
+    if bytes(raw[sec['.hash']['start']:sec['.hash']['start']+8]) != hsys[:8]: raise SystemExit('surviving SysV hash header mismatch')
+
     replacements={'.dynsym':dynsym,'.gnu.hash':ghash,'.hash':hsys,'.dynstr':dynstr,'.rela.dyn':rela_dyn,'.rela.plt':rela_plt}
     for name,blob in replacements.items():
         s=sec[name]
-        if len(blob)!=s['size']: raise SystemExit(f'{name} size mismatch')
+        if len(blob)!=s['size']: raise SystemExit(f'{name} size mismatch {len(blob):x}!={s["size"]:x}')
         raw[s['start']:s['end']]=blob
+
     def doff(s):
         p=dynstr.find(s.encode()+b'\0')
         if p<0: raise SystemExit('missing dynstr '+s)
         return p
     dynamic=[]
     for lib in needed: dynamic.append((DT_NEEDED,doff(lib)))
-    dynamic += [(DT_SONAME,doff('libysmteam.so')),(DT_HASH,sec['.hash']['start']),(DT_GNU_HASH,sec['.gnu.hash']['start']),(DT_STRTAB,sec['.dynstr']['start']),(DT_STRSZ,len(dynstr)),(DT_SYMTAB,sec['.dynsym']['start']),(DT_SYMENT,24),(DT_VERSYM,sec['.gnu.version']['start']),(DT_VERNEED,sec['.gnu.version_r']['start']),(DT_VERNEEDNUM,len(layout['verneed_entries'])),(DT_RELA,sec['.rela.dyn']['start']),(DT_RELASZ,len(rela_dyn)),(DT_RELAENT,24),(DT_RELACOUNT,len(rela_rel)//24),(DT_PLTGOT,0x50A6B8),(DT_PLTRELSZ,len(rela_plt)),(DT_PLTREL,DT_RELA),(DT_JMPREL,sec['.rela.plt']['start']),(DT_FINI_ARRAY,aux['fini_array']['va']),(DT_FINI_ARRAYSZ,aux['fini_array']['byte_size']),(DT_INIT_ARRAY,aux['init_array']['va']),(DT_INIT_ARRAYSZ,aux['init_array']['byte_size']),(DT_NULL,0)]
+    dynamic += [
+      (DT_SONAME,doff('libysmteam.so')),
+      (DT_FLAGS,DF_BIND_NOW),(DT_FLAGS_1,DF_1_NOW),
+      (DT_RELA,sec['.rela.dyn']['start']),(DT_RELASZ,len(rela_dyn)),(DT_RELAENT,24),(DT_RELACOUNT,len(rela_rel)//24),
+      (DT_JMPREL,sec['.rela.plt']['start']),(DT_PLTRELSZ,len(rela_plt)),(DT_PLTGOT,0x50A6B8),(DT_PLTREL,DT_RELA),
+      (DT_SYMTAB,sec['.dynsym']['start']),(DT_SYMENT,24),(DT_STRTAB,sec['.dynstr']['start']),(DT_STRSZ,len(dynstr)),
+      (DT_GNU_HASH,sec['.gnu.hash']['start']),(DT_HASH,sec['.hash']['start']),
+      (DT_INIT_ARRAY,aux['init_array']['va']),(DT_INIT_ARRAYSZ,aux['init_array']['byte_size']),
+      (DT_FINI_ARRAY,aux['fini_array']['va']),(DT_FINI_ARRAYSZ,aux['fini_array']['byte_size']),
+      (DT_VERSYM,sec['.gnu.version']['start']),(DT_VERNEED,sec['.gnu.version_r']['start']),(DT_VERNEEDNUM,len(layout['verneed_entries'])),
+      (DT_NULL,0)]
     dynrec=next(x for x in ph['program_headers'] if x['p_type']==2); dynblob=b''.join(struct.pack('<qQ',t,v) for t,v in dynamic)
-    if len(dynblob)>dynrec['p_filesz']: raise SystemExit('dynamic too large')
-    raw[dynrec['p_offset']:dynrec['p_offset']+dynrec['p_filesz']]=dynblob+b'\0'*(dynrec['p_filesz']-len(dynblob))
+    if len(dynamic) != 35: raise SystemExit(f'unexpected dynamic entry count {len(dynamic)}')
+    if len(dynblob) != dynrec['p_filesz']: raise SystemExit(f'dynamic table does not exactly fill PT_DYNAMIC: 0x{len(dynblob):x} != 0x{dynrec["p_filesz"]:x}')
+    raw[dynrec['p_offset']:dynrec['p_offset']+dynrec['p_filesz']]=dynblob
 
     phoff=ph['elf_header_facts']['e_phoff']; phnum=ph['elf_header_facts']['e_phnum']; phblob=b''.join(pack_phdr(r) for r in ph['program_headers'])
     shstr={'start':0x52F8AA,'end':0x52F9AA,'size':0x100}; shstr_bytes=bytes(raw[shstr['start']:shstr['end']]); shoff=align(shstr['end'],8)
-    names=['','.note.android.ident','.dynsym','.gnu.version','.gnu.version_r','.gnu.hash','.hash','.dynstr','.rela.dyn','.rela.plt','.gcc_except_table','.rodata','.eh_frame_hdr','.eh_frame','.text','.plt','.data.rel.ro','.fini_array','.init_array','.dynamic','.got','.got.plt','.relro_padding','.data','.bss','.comment','.shstrtab']
+    names=['', '.note.android.ident','.dynsym','.gnu.version','.gnu.version_r','.gnu.hash','.hash','.dynstr','.rela.dyn','.rela.plt','.gcc_except_table','.rodata','.eh_frame_hdr','.eh_frame','.text','.plt','.data.rel.ro','.fini_array','.init_array','.dynamic','.got','.got.plt','.relro_padding','.data','.bss','.comment','.shstrtab']
+    if len(names)!=27: raise AssertionError
     noff={'':0}
     for name in names[1:]:
         p=shstr_bytes.find(name.encode()+b'\0')
@@ -101,7 +140,7 @@ def main():
     if len(shblob)!=0x6c0 or shoff+len(shblob)!=len(raw): raise SystemExit('section-header extent mismatch')
     raw[:64]=pack_ehdr(phoff,phnum,shoff,len(names),idx['.shstrtab']); raw[phoff:phoff+len(phblob)]=phblob; raw[shoff:]=shblob
     args.output.write_bytes(raw)
-    args.output.with_suffix(args.output.suffix+'.json').write_text(json.dumps({'kind':'original-placement semantic reconstruction','size':len(raw),'e_shoff':shoff,'e_shnum':27,'e_shstrndx':idx['.shstrtab'],'dynamic_entries':len(dynamic),'gnu_hash_header':gh},indent=2))
+    args.output.with_suffix(args.output.suffix+'.json').write_text(json.dumps({'kind':'original-placement semantic reconstruction','size':len(raw),'e_shoff':shoff,'e_shnum':27,'e_shstrndx':idx['.shstrtab'],'dynamic_entries':len(dynamic),'dynamic_exact_fill':len(dynblob)==dynrec['p_filesz'],'gnu_hash_surviving_chain_suffix':suffix,'gnu_hash_header':gh},indent=2))
     print('[+] wrote',args.output)
     print(f'    size remains      : 0x{len(raw):x}')
     print(f'    e_shoff/e_shnum   : 0x{shoff:x} / {len(names)}')
