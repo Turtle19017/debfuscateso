@@ -1,13 +1,4 @@
 #!/usr/bin/env python3
-"""Build a loader-shaped synthetic AArch64 ELF from the recovered inner image.
-
-Unlike build_inner_analysis_elf.py, this wrapper also maps the recovered dynamic
-metadata into an allocated synthetic metadata PT_LOAD and emits PT_DYNAMIC with
-DT_NEEDED/DT_HASH/DT_STRTAB/DT_SYMTAB/DT_RELA/DT_JMPREL information.
-
-The reconstructed metadata virtual addresses and program headers are analysis
-metadata. They are NOT claimed to be the producer's original ELF layout.
-"""
 import argparse
 import csv
 import struct
@@ -22,7 +13,7 @@ STB_GLOBAL=1; STT_NOTYPE=0; STT_OBJECT=1; STT_FUNC=2
 
 DT_NULL=0; DT_NEEDED=1; DT_PLTRELSZ=2; DT_PLTGOT=3; DT_HASH=4; DT_STRTAB=5; DT_SYMTAB=6
 DT_RELA=7; DT_RELASZ=8; DT_RELAENT=9; DT_STRSZ=10; DT_SYMENT=11; DT_SONAME=14
-DT_PLTREL=20; DT_JMPREL=23
+DT_PLTREL=20; DT_JMPREL=23; DT_RELACOUNT=0x6ffffff9
 
 PAYLOAD_OFF=0x1000
 RO_END=0x25E2E0; TEXT_END=0x4D6810; PLT_END=0x4E29C0
@@ -74,9 +65,15 @@ def load_metadata(d):
     required=['dynstr.bin','dynsym.bin','rela.dyn.bin','rela.plt.bin','dynsym.tsv','plt.tsv']
     for n in required:
         if not (d/n).exists(): raise SystemExit(f'missing metadata file: {d/n}')
-    return ((d/'dynstr.bin').read_bytes(),(d/'dynsym.bin').read_bytes(),(d/'rela.dyn.bin').read_bytes(),(d/'rela.plt.bin').read_bytes(),
+    rela_symbolic=(d/'rela.dyn.bin').read_bytes()
+    rela_relative=(d/'rela.relative.bin').read_bytes() if (d/'rela.relative.bin').exists() else b''
+    needed=None
+    if (d/'needed.txt').exists():
+        needed=[x.strip() for x in (d/'needed.txt').read_text(encoding='utf-8').splitlines() if x.strip()]
+    return ((d/'dynstr.bin').read_bytes(),(d/'dynsym.bin').read_bytes(),rela_relative+rela_symbolic,(d/'rela.plt.bin').read_bytes(),
       list(csv.DictReader((d/'dynsym.tsv').open(encoding='utf-8'),delimiter='\t')),
-      list(csv.DictReader((d/'plt.tsv').open(encoding='utf-8'),delimiter='\t')))
+      list(csv.DictReader((d/'plt.tsv').open(encoding='utf-8'),delimiter='\t')),
+      len(rela_relative)//24, needed)
 
 def iter_cstrings(buf):
     pos=0
@@ -118,16 +115,16 @@ def build_sysv_hash(dynsym:bytes,dynstr:bytes):
     return struct.pack('<II',nbucket,nchain)+struct.pack('<%dI'%nbucket,*buckets)+struct.pack('<%dI'%nchain,*chains)
 
 def find_dynstr_offset(dynstr,name):
-    p=dynstr.find(name.encode()+b'\0')
+    needle=name.encode()+b'\0'; p=dynstr.find(needle)
     if p<0: raise SystemExit(f'missing dynstr string: {name}')
     return p
 
 def main():
-    ap=argparse.ArgumentParser(description='Build a synthetic loader-shaped AArch64 ELF from recovered YSM inner image + metadata.')
+    ap=argparse.ArgumentParser(description='Build a synthetic but loader-shaped AArch64 ELF from recovered YSM inner image + metadata.')
     ap.add_argument('input'); ap.add_argument('output'); ap.add_argument('--metadata-dir',required=True)
     args=ap.parse_args(); payload=Path(args.input).read_bytes(); md=Path(args.metadata_dir)
     if len(payload)!=FILE_END: print(f'[!] warning expected inner size 0x{FILE_END:x}, got 0x{len(payload):x}')
-    dynstr,raw_dynsym,rela_dyn,rela_plt,dynrows,pltrows=load_metadata(md)
+    dynstr,raw_dynsym,rela_dyn,rela_plt,dynrows,pltrows,relative_count,recovered_needed=load_metadata(md)
     if len(raw_dynsym)%24: raise SystemExit('bad dynsym size')
 
     section_names=['','blob','text','plt','data','got','gotplt','data_tail','bss','dynstr','dynsym','hash','rela_dyn','rela_plt','dynamic','strtab','symtab','shstrtab']
@@ -148,7 +145,7 @@ def main():
 
     so_strings=[(off,s) for off,s in iter_cstrings(dynstr) if s.startswith('lib') and s.endswith('.so')]
     soname='libysmteam.so' if any(s=='libysmteam.so' for _,s in so_strings) else (so_strings[-1][1] if so_strings else None)
-    needed=[s for _,s in so_strings if s!=soname]
+    needed=recovered_needed if recovered_needed is not None else [s for _,s in so_strings if s!=soname]
 
     strtab=bytearray(b'\0'); string_offsets={}
     def intern(n):
@@ -177,6 +174,7 @@ def main():
     for n in needed: dynamic_entries.append((DT_NEEDED,find_dynstr_offset(dynstr,n)))
     dynamic_entries += [(DT_HASH,hash_va),(DT_STRTAB,dynstr_va),(DT_SYMTAB,dynsym_va),(DT_STRSZ,len(dynstr)),(DT_SYMENT,24),
       (DT_RELA,rela_dyn_va),(DT_RELASZ,len(rela_dyn)),(DT_RELAENT,24),(DT_PLTGOT,GOTPLT_START),(DT_PLTRELSZ,len(rela_plt)),(DT_PLTREL,DT_RELA),(DT_JMPREL,rela_plt_va)]
+    if relative_count: dynamic_entries.append((DT_RELACOUNT,relative_count))
     if soname: dynamic_entries.append((DT_SONAME,find_dynstr_offset(dynstr,soname)))
     dynamic_entries.append((DT_NULL,0))
     dynamic_blob=b''.join(struct.pack('<qQ',tag,val) for tag,val in dynamic_entries)
@@ -218,11 +216,10 @@ def main():
     Path(args.output).write_bytes(data)
     print(f'[+] wrote {args.output}')
     print(f'    dynsym        : {len(dynsym)//24} entries')
-    print(f'    rela.dyn      : {len(rela_dyn)//24} entries')
+    print(f'    rela.dyn      : {len(rela_dyn)//24} entries ({relative_count} synthetic RELATIVE first)')
     print(f'    rela.plt      : {len(rela_plt)//24} entries')
     print(f'    DT_NEEDED     : {len(needed)} ({", ".join(needed)})')
     print(f'    SONAME        : {soname}')
     print(f'    metadata LOAD : file 0x{meta_off:x} -> VA 0x{META_VA:x}')
     print('[!] program headers / metadata VA are synthetic analysis reconstruction, not claimed original')
-
-if __name__=='__main__': main()
+if __name__=='__main__':main()
