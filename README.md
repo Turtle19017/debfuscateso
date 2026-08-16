@@ -37,6 +37,36 @@ python tools/dump_vm.py libysmteam.so vm_dump
 
 This writes the six mapped bytecode blobs plus `manifest.json`.
 
+### Extract the inner payload directly from the original SO
+
+The white-box `B1E90` stage is now reproduced offline, so the complete inner
+payload can be extracted without running Android or dumping process memory:
+
+```bash
+python tools/extract_inner.py libysmteam.so ysm_inner_payload.bin
+```
+
+Optional intermediate dumps:
+
+```bash
+python tools/extract_inner.py libysmteam.so ysm_inner_payload.bin --work-dir work
+```
+
+The `B1E90` emulator uses the Python `unicorn` package (`pip install unicorn`).
+The ChaCha20 stage uses `cryptography` when available and falls back to the bundled
+pure-Python implementation.
+
+For the checkpoint sample the final inner image is `0x530070` bytes with SHA-256
+`5a0ff6b4e1d3bf811dbd1f2b5db3e48ae14c12fb6da5f5662bf2e3c7bd66f168`.
+
+### Run the B1E90 stage separately
+
+```bash
+python tools/emulate_b1e90.py libysmteam.so small_cipher.bin small_plain.bin
+```
+
+See `research/B1E90.md` for the emulated instruction subset and validation hashes.
+
 ### Decrypt the reconstructed inner combined stream
 
 After reproducing the earlier sample-specific small-blob pre-transform and assembling the combined ChaCha20 ciphertext:
@@ -60,6 +90,7 @@ This reports known framework markers and sample offsets used by the research not
 - `research/CHECKPOINT.md` — high-level checkpoint.
 - `research/ADDRESS_MAP.md` — outer, VM and inner-image address map.
 - `research/VM.md` — dispatcher, register encoding and opcode checkpoint.
+- `research/B1E90.md` — concrete emulation of the white-box block transform and end-to-end validation.
 - `research/AUTH_FLOW.md` — menu/login data flow and remaining protocol questions.
 
 ## Sample hashes
