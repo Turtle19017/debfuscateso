@@ -121,6 +121,65 @@ jmethodID ctor = env->GetMethodID(
 
 The trampoline at `0x272B04` loads `JNIEnv` slot `+0xE8`, which is the `NewObjectV` slot. The continuation therefore constructs a Java `GLES3JNIView` instance using an Android `Context` argument before later overlay/window integration.
 
+## NewObject result and persistent view reference
+
+The result of `NewObjectV` is checked at `0x2716D8`. The corresponding flattened states evaluate to:
+
+```text
+state 34 (new object != NULL) -> 0x271730
+state 31 (new object == NULL) -> 0x2725F8
+```
+
+On the non-null path, an obfuscated data access at `0x271770` resolves to the BSS global:
+
+```text
+0x5376E0
+```
+
+The current value is tested for null. The next states are:
+
+```text
+state 21 (existing global != NULL) -> 0x2717A4
+state 28 (existing global == NULL) -> 0x271834
+```
+
+The call at `0x27182C` resolves to:
+
+```text
+0x272BA0 -> JNIEnv table +0xB0 -> DeleteGlobalRef
+```
+
+so an existing object reference at `0x5376E0` is released first.
+
+The following call at `0x2718B8` resolves to:
+
+```text
+0x272BAC -> JNIEnv table +0xA8 -> NewGlobalRef
+```
+
+and the returned global reference is written back through the obfuscated store at `0x2718E4`. Static evaluation resolves that store target exactly to:
+
+```text
+0x5376E0
+```
+
+Therefore `0x5376E0` is the persistent JNI global reference for the currently constructed `GLES3JNIView` object:
+
+```c
+if (g_gles3_view != nullptr)
+    env->DeleteGlobalRef(g_gles3_view);
+
+g_gles3_view = env->NewGlobalRef(new_view);
+```
+
+The next indirect call at `0x271948` resolves to:
+
+```text
+0x272BB8 -> JNIEnv table +0xF8 -> GetObjectClass
+```
+
+showing that the path continues with Java object/class reflection after publishing the persistent overlay-view reference.
+
 ## Architectural consequence
 
 The natural post-Dex path now has a stronger shape:
@@ -132,7 +191,8 @@ DexLoader 0x355944
   -> loadClass("com.ysmteam.imgui.GLES3JNIView")
   -> GetMethodID("<init>", "(Landroid/content/Context;)V")
   -> NewObjectV(...)
-  -> later Java overlay integration
+  -> replace persistent GlobalRef @ 0x5376E0
+  -> further Java reflection / overlay integration
 ```
 
 This means `0x3016AC` (the polling/custom-hash IL2CPP resolver) remains a separate subsystem whose **exact incoming edge is still unresolved**. A scan found no direct `BL 0x3016AC` and no plain 64-bit function pointer equal to that VA in the reconstructed file. It may be reached through another flattened/indirect state or another worker later in initialization.
@@ -162,4 +222,5 @@ loadClass state 27       -> 0x272684
 GetMethodID trampoline   -> 0x2728C4
 NewObjectV trampoline    -> 0x272B04
 constructor              -> <init>(Landroid/content/Context;)V
+persistent view GlobalRef -> 0x5376E0
 ```
