@@ -46,7 +46,7 @@ def recovered_literals(image: bytes) -> dict[str, str]:
         "_ts": image[0xF7890:0xF7894],
         "status": image[0xF7198:0xF719C] + bytes([0x4A, 0x4C, 0x3F]),
         "message": image[0xF8350:0xF8358],
-        "OK": bytes([0x74, 0x70, 0x3F]),
+        "OK": bytes([0x70, 0x74, 0x3F]),
         "Invalid": image[0xF77C0:0xF77C8],
         # First 16 bytes are contiguous in rodata; the encoded d/NUL tail is
         # supplied by the lazy initializer as a short immediate.
