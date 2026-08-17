@@ -1,20 +1,3 @@
-# User-supplied / extracted binaries
-*.apk
-*.apks
-*.aab
 *.so
-*.bin
-*.o
-*.zip
-
-# Analysis output
-*.dis
-*.dump
-*.log
-out/
-dumps/
-vm_dump/
-
-# Python
 __pycache__/
 *.pyc

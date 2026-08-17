@@ -1,0 +1,629 @@
+{
+  "file": "ysm_inner.original_placement_v3(1).so",
+  "size": 5439600,
+  "sha256": "5bb1dc65600331fee38e11a1815054a1b14ace93c206ce19521b42abb5560ba1",
+  "machine": "AArch64",
+  "resolver": [
+    {
+      "resolver_call": "0x3016fc",
+      "name_va": "0x104e7e",
+      "name": "il2cpp_assembly_get_image",
+      "slot": "0x63e0e0"
+    },
+    {
+      "resolver_call": "0x301718",
+      "name_va": "0x1108ca",
+      "name": "il2cpp_domain_get",
+      "slot": "0x63e0d8"
+    },
+    {
+      "resolver_call": "0x301734",
+      "name_va": "0xf9b35",
+      "name": "il2cpp_domain_get_assemblies",
+      "slot": "0x63e0d0"
+    },
+    {
+      "resolver_call": "0x301750",
+      "name_va": "0x11c38e",
+      "name": "il2cpp_image_get_name",
+      "slot": "0x63e0e8"
+    },
+    {
+      "resolver_call": "0x30176c",
+      "name_va": "0x10f513",
+      "name": "il2cpp_class_from_name",
+      "slot": "0x63e110"
+    },
+    {
+      "resolver_call": "0x301788",
+      "name_va": "0x107281",
+      "name": "il2cpp_class_get_field_from_name",
+      "slot": "0x63e128"
+    },
+    {
+      "resolver_call": "0x3017a4",
+      "name_va": "0x1187f1",
+      "name": "il2cpp_class_get_method_from_name",
+      "slot": "0x63e140"
+    },
+    {
+      "resolver_call": "0x3017c0",
+      "name_va": "0x10e484",
+      "name": "il2cpp_field_get_offset",
+      "slot": "0x63e168"
+    },
+    {
+      "resolver_call": "0x3017dc",
+      "name_va": "0x11d5cc",
+      "name": "il2cpp_field_static_get_value",
+      "slot": "0x63e130"
+    },
+    {
+      "resolver_call": "0x3017f8",
+      "name_va": "0x1095dc",
+      "name": "il2cpp_field_static_set_value",
+      "slot": "0x63e138"
+    },
+    {
+      "resolver_call": "0x301814",
+      "name_va": "0x115409",
+      "name": "il2cpp_array_new",
+      "slot": "0x63e120"
+    },
+    {
+      "resolver_call": "0x301830",
+      "name_va": "0xfbe16",
+      "name": "il2cpp_string_chars",
+      "slot": "0x63e170"
+    },
+    {
+      "resolver_call": "0x30184c",
+      "name_va": "0x11415c",
+      "name": "il2cpp_string_new",
+      "slot": "0x63e0c0"
+    },
+    {
+      "resolver_call": "0x301868",
+      "name_va": "0x104e98",
+      "name": "il2cpp_string_new_utf16",
+      "slot": "0x63e0c8"
+    },
+    {
+      "resolver_call": "0x301884",
+      "name_va": "0x116303",
+      "name": "il2cpp_type_get_name",
+      "slot": "0x63e160"
+    },
+    {
+      "resolver_call": "0x3018a0",
+      "name_va": "0xfdd8a",
+      "name": "il2cpp_method_get_param",
+      "slot": "0x63e158"
+    },
+    {
+      "resolver_call": "0x3018bc",
+      "name_va": "0x11ae01",
+      "name": "il2cpp_class_get_methods",
+      "slot": "0x63e148"
+    },
+    {
+      "resolver_call": "0x3018d8",
+      "name_va": "0xf9b52",
+      "name": "il2cpp_method_get_name",
+      "slot": "0x63e150"
+    },
+    {
+      "resolver_call": "0x3018f4",
+      "name_va": "0x11541a",
+      "name": "il2cpp_object_new",
+      "slot": "0x63e118"
+    }
+  ],
+  "wrappers": {
+    "find_class_cached": {
+      "address": "0x3011ac",
+      "xrefs": [
+        {
+          "callsite": "0x301530"
+        },
+        {
+          "callsite": "0x301648"
+        }
+      ]
+    },
+    "resolve_method_pointer": {
+      "address": "0x301474",
+      "xrefs": [
+        {
+          "callsite": "0x25ea24",
+          "x0": "0x537810",
+          "x1": "0x537828",
+          "x2": "0x537838",
+          "x3": "0x537848",
+          "argc": 1,
+          "decoded": {
+            "image": "mscorlib.dll",
+            "namespace": "System",
+            "class": "String",
+            "member": "get_Chars",
+            "argc": 1
+          }
+        },
+        {
+          "callsite": "0x25ede0",
+          "x0": "0x537860",
+          "x1": "0x537888",
+          "x2": "0x5378a0",
+          "x3": "0x5378b8",
+          "argc": 0,
+          "decoded": {
+            "image": "UnityEngine.CoreModule.dll",
+            "namespace": "UnityEngine",
+            "class": "Transform",
+            "member": "get_position",
+            "argc": 0
+          }
+        },
+        {
+          "callsite": "0x25f200",
+          "x0": "0x5378d0",
+          "x1": "0x5378f8",
+          "x2": "0x537910",
+          "x3": "0x537930",
+          "argc": 0,
+          "decoded": {
+            "image": "UnityEngine.CoreModule.dll",
+            "namespace": "UnityEngine",
+            "class": "Component",
+            "member": "get_gameObject",
+            "argc": 0
+          }
+        },
+        {
+          "callsite": "0x25f944",
+          "x0": "0x537a20",
+          "x1": "0x537a40",
+          "x2": "0x537a58",
+          "x3": "0x537a68",
+          "argc": 0,
+          "decoded": {
+            "image": "Assembly-CSharp.dll",
+            "namespace": "COW.GamePlay",
+            "class": "Player",
+            "member": "get_HeadCollider",
+            "argc": 0
+          }
+        },
+        {
+          "callsite": "0x25fad8",
+          "x0": "0x537a88",
+          "x1": "0x537aa8",
+          "x2": "0x537ac0",
+          "x3": "0x537ad8",
+          "argc": 4,
+          "decoded": {
+            "image": "Assembly-CSharp.dll",
+            "namespace": "COW.GamePlay",
+            "class": "HPFKOGPDBBE",
+            "member": "FOHHPOKDOND",
+            "argc": 4
+          }
+        },
+        {
+          "callsite": "0x26000c",
+          "x0": "0x537950",
+          "x1": "0x537970",
+          "x2": "0x537988",
+          "x3": "0x5379a0",
+          "argc": 0,
+          "decoded": {
+            "image": "UnityEngine.dll",
+            "namespace": "UnityEngine",
+            "class": "Component",
+            "member": "get_transform",
+            "argc": 0
+          }
+        },
+        {
+          "callsite": "0x2603c0",
+          "x0": "0x5379c0",
+          "x1": "0x5379e0",
+          "x2": "0x5379f8",
+          "x3": "0x537a08",
+          "argc": 0,
+          "decoded": {
+            "image": "UnityEngine.dll",
+            "namespace": "UnityEngine",
+            "class": "Camera",
+            "member": "get_main",
+            "argc": 0
+          }
+        },
+        {
+          "callsite": "0x260768",
+          "x0": "0x537af0",
+          "x1": "0x537b10",
+          "x2": "0x537b28",
+          "x3": "0x537b38",
+          "argc": 0,
+          "decoded": {
+            "image": "Assembly-CSharp.dll",
+            "namespace": "COW.GamePlay",
+            "class": "Player",
+            "member": "get_IsDieing",
+            "argc": 0
+          }
+        },
+        {
+          "callsite": "0x260b0c",
+          "x0": "0x537b50",
+          "x1": "0x537b70",
+          "x2": "0x537b88",
+          "x3": "0x537ba0",
+          "argc": 1,
+          "decoded": {
+            "image": "Assembly-CSharp.dll",
+            "namespace": "COW.GamePlay",
+            "class": "Player",
+            "member": "IsLocalTeammate",
+            "argc": 1
+          }
+        },
+        {
+          "callsite": "0x260e90",
+          "x0": "0x537bc0",
+          "x1": "0x537be0",
+          "x2": "0x537bf8",
+          "x3": "0x537c08",
+          "argc": 0
+        },
+        {
+          "callsite": "0x261238",
+          "x0": "0x537c20",
+          "x1": "0x537c40",
+          "x2": "0x537c58",
+          "x3": "0x537c68",
+          "argc": 0
+        },
+        {
+          "callsite": "0x2626f0",
+          "x0": "0x537c80",
+          "x1": "0x537ca0",
+          "x2": "0x537cb0",
+          "x3": "0x537cc8",
+          "argc": 0
+        },
+        {
+          "callsite": "0x262a90",
+          "x0": "0x537db0",
+          "x1": "0x537dd0",
+          "x2": "0x537de8",
+          "x3": "0x537df8",
+          "argc": 1
+        },
+        {
+          "callsite": "0x262ca4",
+          "x0": "0x537e18",
+          "x1": "0x537e40",
+          "x2": "0x537e58",
+          "x3": "0x537e68",
+          "argc": 0
+        },
+        {
+          "callsite": "0x262e9c",
+          "x0": "0x537e80",
+          "x1": "0x537ea8",
+          "x2": "0x537ec0",
+          "x3": "0x537ed0",
+          "argc": 0
+        },
+        {
+          "callsite": "0x263584",
+          "x0": "0x537f58",
+          "x1": "0x537f78",
+          "x2": "0x537f90",
+          "x3": "0x537fa0",
+          "argc": 0
+        },
+        {
+          "callsite": "0x263920",
+          "x0": "0x537fb8",
+          "x1": "0x537fd8",
+          "x2": "0x537ff0",
+          "x3": "0x538000",
+          "argc": 0
+        },
+        {
+          "callsite": "0x263cb4",
+          "x0": "0x538018",
+          "x1": "0x538038",
+          "x2": "0x538050",
+          "x3": "0x538060",
+          "argc": 0
+        },
+        {
+          "callsite": "0x264544",
+          "x0": "0x538158",
+          "x1": "0x538178",
+          "x2": "0x538188",
+          "x3": "0x5381b0",
+          "argc": 0
+        },
+        {
+          "callsite": "0x26489c",
+          "x0": "0x5381c8",
+          "x1": "0x5381e8",
+          "x2": "0x538200",
+          "x3": "0x538210",
+          "argc": 0
+        },
+        {
+          "callsite": "0x26533c",
+          "x0": "0x538298",
+          "x1": "0x5382b8",
+          "x2": "0x5382d0",
+          "x3": "0x5382e0",
+          "argc": 0
+        },
+        {
+          "callsite": "0x266020",
+          "x0": "0x538480",
+          "x1": "0x5384a0",
+          "x2": "0x5384b8",
+          "x3": "0x5384c8",
+          "argc": 0
+        },
+        {
+          "callsite": "0x267c80",
+          "x0": "0x5383c0",
+          "x1": "0x5383e0",
+          "x2": "0x5383f8",
+          "x3": "0x538408",
+          "argc": 0
+        },
+        {
+          "callsite": "0x268020",
+          "x0": "0x538420",
+          "x1": "0x538440",
+          "x2": "0x538458",
+          "x3": "0x538468",
+          "argc": 0
+        },
+        {
+          "callsite": "0x2684f8",
+          "x0": "0x538528",
+          "x1": "0x538548",
+          "x2": "0x538560",
+          "x3": "0x538578",
+          "argc": 0
+        },
+        {
+          "callsite": "0x274c04",
+          "x0": "0x538900",
+          "x1": "0x538920",
+          "x2": "0x538930",
+          "x3": "0x538950",
+          "argc": 0
+        },
+        {
+          "callsite": "0x274fe8",
+          "x0": "0x538968",
+          "x1": "0x538988",
+          "x2": "0x5389a0",
+          "x3": "0x5389c0",
+          "argc": 11
+        }
+      ]
+    },
+    "resolve_field_offset": {
+      "address": "0x301590",
+      "xrefs": [
+        {
+          "callsite": "0x2615e8",
+          "x0": "0x537ce0",
+          "x1": "0x537d00",
+          "x2": "0x537d18",
+          "x3": "0x537d30",
+          "argc": null,
+          "decoded": {
+            "image": "Assembly-CSharp.dll",
+            "namespace": "COW.GamePlay",
+            "class": "EMKJHAJNPDH",
+            "member": "PDBGEOANOEP"
+          }
+        },
+        {
+          "callsite": "0x261768",
+          "x0": "0x537d48",
+          "x1": "0x537d68",
+          "x2": "0x537d80",
+          "x3": "0x537d98",
+          "argc": null,
+          "decoded": {
+            "image": "Assembly-CSharp.dll",
+            "namespace": "COW.GamePlay",
+            "class": "EMKJHAJNPDH",
+            "member": "MMECELKLHFC"
+          }
+        },
+        {
+          "callsite": "0x2619e0",
+          "x0": "0x537ee8",
+          "x1": "0x537f08",
+          "x2": "0x537f20",
+          "x3": "0x537f30",
+          "argc": null,
+          "decoded": {
+            "image": "Assembly-CSharp.dll",
+            "namespace": "COW.GamePlay",
+            "class": "Player",
+            "member": "<NNFKGNCILNK>k__BackingField"
+          }
+        },
+        {
+          "callsite": "0x261e30",
+          "x0": "0x5380e8",
+          "x1": "0x538108",
+          "x2": "0x538120",
+          "x3": "0x538130",
+          "argc": null
+        },
+        {
+          "callsite": "0x264c50",
+          "x0": "0x538230",
+          "x1": "0x538250",
+          "x2": "0x538268",
+          "x3": "0x538280",
+          "argc": null
+        },
+        {
+          "callsite": "0x265718",
+          "x0": "0x5382f8",
+          "x1": "0x538318",
+          "x2": "0x538330",
+          "x3": "0x538348",
+          "argc": null
+        },
+        {
+          "callsite": "0x2659b4",
+          "x0": "0x538360",
+          "x1": "0x538380",
+          "x2": "0x538398",
+          "x3": "0x5383a8",
+          "argc": null
+        },
+        {
+          "callsite": "0x268368",
+          "x0": "0x5384e0",
+          "x1": "0x538500",
+          "x2": "0x538518",
+          "x3": null,
+          "argc": null
+        }
+      ]
+    },
+    "init_il2cpp_api": {
+      "address": "0x3016ac",
+      "xrefs": []
+    }
+  },
+  "managed_targets": [
+    {
+      "wrapper": "resolve_method_pointer",
+      "callsite": "0x25ea24",
+      "image": "mscorlib.dll",
+      "namespace": "System",
+      "class": "String",
+      "member": "get_Chars",
+      "argc": 1,
+      "signature": "mscorlib.dll::System.String::get_Chars/1"
+    },
+    {
+      "wrapper": "resolve_method_pointer",
+      "callsite": "0x25ede0",
+      "image": "UnityEngine.CoreModule.dll",
+      "namespace": "UnityEngine",
+      "class": "Transform",
+      "member": "get_position",
+      "argc": 0,
+      "signature": "UnityEngine.CoreModule.dll::UnityEngine.Transform::get_position/0"
+    },
+    {
+      "wrapper": "resolve_method_pointer",
+      "callsite": "0x25f200",
+      "image": "UnityEngine.CoreModule.dll",
+      "namespace": "UnityEngine",
+      "class": "Component",
+      "member": "get_gameObject",
+      "argc": 0,
+      "signature": "UnityEngine.CoreModule.dll::UnityEngine.Component::get_gameObject/0"
+    },
+    {
+      "wrapper": "resolve_method_pointer",
+      "callsite": "0x25f944",
+      "image": "Assembly-CSharp.dll",
+      "namespace": "COW.GamePlay",
+      "class": "Player",
+      "member": "get_HeadCollider",
+      "argc": 0,
+      "signature": "Assembly-CSharp.dll::COW.GamePlay.Player::get_HeadCollider/0"
+    },
+    {
+      "wrapper": "resolve_method_pointer",
+      "callsite": "0x25fad8",
+      "image": "Assembly-CSharp.dll",
+      "namespace": "COW.GamePlay",
+      "class": "HPFKOGPDBBE",
+      "member": "FOHHPOKDOND",
+      "argc": 4,
+      "signature": "Assembly-CSharp.dll::COW.GamePlay.HPFKOGPDBBE::FOHHPOKDOND/4"
+    },
+    {
+      "wrapper": "resolve_method_pointer",
+      "callsite": "0x26000c",
+      "image": "UnityEngine.dll",
+      "namespace": "UnityEngine",
+      "class": "Component",
+      "member": "get_transform",
+      "argc": 0,
+      "signature": "UnityEngine.dll::UnityEngine.Component::get_transform/0"
+    },
+    {
+      "wrapper": "resolve_method_pointer",
+      "callsite": "0x2603c0",
+      "image": "UnityEngine.dll",
+      "namespace": "UnityEngine",
+      "class": "Camera",
+      "member": "get_main",
+      "argc": 0,
+      "signature": "UnityEngine.dll::UnityEngine.Camera::get_main/0"
+    },
+    {
+      "wrapper": "resolve_method_pointer",
+      "callsite": "0x260768",
+      "image": "Assembly-CSharp.dll",
+      "namespace": "COW.GamePlay",
+      "class": "Player",
+      "member": "get_IsDieing",
+      "argc": 0,
+      "signature": "Assembly-CSharp.dll::COW.GamePlay.Player::get_IsDieing/0"
+    },
+    {
+      "wrapper": "resolve_method_pointer",
+      "callsite": "0x260b0c",
+      "image": "Assembly-CSharp.dll",
+      "namespace": "COW.GamePlay",
+      "class": "Player",
+      "member": "IsLocalTeammate",
+      "argc": 1,
+      "signature": "Assembly-CSharp.dll::COW.GamePlay.Player::IsLocalTeammate/1"
+    },
+    {
+      "wrapper": "resolve_field_offset",
+      "callsite": "0x2615e8",
+      "image": "Assembly-CSharp.dll",
+      "namespace": "COW.GamePlay",
+      "class": "EMKJHAJNPDH",
+      "member": "PDBGEOANOEP",
+      "signature": "Assembly-CSharp.dll::COW.GamePlay.EMKJHAJNPDH::PDBGEOANOEP"
+    },
+    {
+      "wrapper": "resolve_field_offset",
+      "callsite": "0x261768",
+      "image": "Assembly-CSharp.dll",
+      "namespace": "COW.GamePlay",
+      "class": "EMKJHAJNPDH",
+      "member": "MMECELKLHFC",
+      "signature": "Assembly-CSharp.dll::COW.GamePlay.EMKJHAJNPDH::MMECELKLHFC"
+    },
+    {
+      "wrapper": "resolve_field_offset",
+      "callsite": "0x2619e0",
+      "image": "Assembly-CSharp.dll",
+      "namespace": "COW.GamePlay",
+      "class": "Player",
+      "member": "<NNFKGNCILNK>k__BackingField",
+      "signature": "Assembly-CSharp.dll::COW.GamePlay.Player::<NNFKGNCILNK>k__BackingField"
+    }
+  ]
+}
